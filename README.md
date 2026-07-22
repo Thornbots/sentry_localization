@@ -103,9 +103,9 @@ config change you just made, check `diff install/sentry_localization/
 share/sentry_localization/config/amcl.yaml src/sentry_localization/
 config/amcl.yaml` before assuming the change itself didn't work.
 
-Scenarios (`--scenario NAME` to run just one; all six run by default, in
-this order): `baseline`, `continuous_drift`, `jerk_with_motion`,
-`jerk_stationary`, `drift_correction_obstacle`, `drift_correction`. Each
+Scenarios (`--scenario NAME` to run just one; all five run by default, in
+this order): `baseline`, `jerk_with_motion`, `jerk_stationary`,
+`drift_correction_obstacle`, `drift_correction`. Each
 scenario's exact pass condition and rationale is documented in the
 script's own module docstring (`SCENARIOS` section) — read that before
 interpreting a failure, since several of these assert a documented

@@ -102,7 +102,7 @@ responsible for, not literally "map->odom" in every case:
     watching amcl's own TF broadcast instead of slam_toolbox's.
   - 'ekf' owns odom->root instead of map->odom (localization_mode:=ekf
     runs no map node at all -- see auto.launch.py's module docstring) --
-    baseline/continuous_drift are exercised against odom->root instead of
+    baseline is exercised against odom->root instead of
     map->odom (BACKEND_FRAMES below), since that's the analogous "is the
     correction layer behaving" edge for this backend. jerk_with_motion/
     jerk_stationary are SKIPPED for ekf, not asserted: ekf_node fuses
@@ -131,19 +131,11 @@ SCENARIOS
                        ARCC26 map's origin doesn't coincide with sim's
                        spawn pose, so a consistent ~0.1-0.15m absolute
                        offset here is normal. No ERROR in any log.
-2. continuous_drift -- odom_noise_enabled:=true, default drift/jitter
-                       stddevs plus a 0.25 wheel-slip ratio (reported
-                       odometry loses 1/4 of every meter actually
-                       driven, see pose_emulator.py's odom_slip_ratio),
-                       robot given continuous motion at real speed. Over
-                       an observation window, the correction TF should
-                       stay BOUNDED (periodic correction keeping up with
-                       accumulated drift+slip), not grow without bound.
-3. jerk_with_motion -- (slam/amcl only, see BACKENDS) fire trigger_jerk,
+2. jerk_with_motion -- (slam/amcl only, see BACKENDS) fire trigger_jerk,
                        then command a small amount of /cmd_vel motion.
                        Assert the correction TF produces a prompt, real
                        correction whose magnitude tracks the jerk.
-4. jerk_stationary  -- (slam/amcl only, see BACKENDS) fire trigger_jerk,
+3. jerk_stationary  -- (slam/amcl only, see BACKENDS) fire trigger_jerk,
                        robot never moves afterward. Assert the correction
                        TF does NOT change. This is a KNOWN, EXPECTED,
                        DOCUMENTED structural limitation (see slam.yaml's
@@ -159,7 +151,7 @@ SCENARIOS
                        observed the known limitation," not "localization
                        is broken" -- read the printed rationale in its
                        output before assuming a regression.
-5. drift_correction_obstacle -- (slam/amcl only, see BACKENDS) spawn a static box
+4. drift_correction_obstacle -- (slam/amcl only, see BACKENDS) spawn a static box
                        into the running world mid-scenario (not present in
                        ARCC_Field_2026.sdf or the saved ARCC26 map -- from
                        the backend's perspective it's a lidar return with
@@ -176,7 +168,7 @@ SCENARIOS
                        only locally corrupt returns near it, not swing the
                        whole map alignment) and that scans keep flowing
                        (backend didn't stall).
-6. drift_correction -- (slam/amcl only, see BACKENDS) drives the exact
+5. drift_correction -- (slam/amcl only, see BACKENDS) drives the exact
                        same hard-cornering loop as drift_correction_obstacle
                        (OBSTACLE_LOOP_LEGS), with no obstacle spawned.
                        Shares its driving code and MAX_DELTA_THRESHOLD
@@ -462,9 +454,10 @@ BACKEND_FRAMES = {
     'ekf': ('odom', 'root'),
 }
 
-# Driving path used by continuous_drift/jerk_with_motion, at the robot's
-# real 4.0 m/s top speed (see those scenarios' git history for why, vs.
-# the old 0.15 m/s wiggle).
+# Driving path used by jerk_with_motion, at the robot's real 4.0 m/s top
+# speed (see that scenario's git history for why, vs. the old 0.15 m/s
+# wiggle -- also previously shared with continuous_drift before that
+# scenario was removed as redundant with drift_correction).
 #
 # A first version of this (2026-07-20) tried to actually tour the field --
 # mapped clean_map.pgm's wall positions via connected-component analysis,
@@ -511,9 +504,9 @@ PATROL_LEGS = [
 # a chain of one-off offset corrections.
 # OBSTACLE_XY = (0.5, 0.5) deliberately reuses PATROL_LEGS's own loop
 # center (its corners (0,0),(1,0),(1,1),(0,1) center on (0.5,0.5)) --
-# already-validated open space (continuous_drift/jerk_with_motion drive
-# through this immediate area for tens of seconds without incident), not
-# a new, untested spot.
+# already-validated open space (jerk_with_motion drives through this
+# immediate area for tens of seconds without incident), not a new,
+# untested spot.
 # NOT baked into ARCC_Field_2026.sdf or the saved ARCC26 map -- that's
 # the point: from the backend's perspective this is a lidar return with
 # no corresponding feature in the map it loaded.
@@ -825,86 +818,6 @@ def scenario_baseline(gui, backend):
         teardown_stack(sim_tree, sentry_tree, helper)
 
 
-def scenario_continuous_drift(gui, backend):
-    parent, child = BACKEND_FRAMES[backend]
-    edge = f'{parent}->{child}'
-    sc = Scenario('continuous_drift',
-                  f'continuous drift+jitter+slip with motion: {edge} '
-                  'should correct periodically and stay bounded, not grow '
-                  'without limit')
-    sim_tree = sentry_tree = helper = None
-    # 0.25 (down from an initial 0.5, see git history) -- reported
-    # odometry loses 1/4 of every meter the robot actually drives (see
-    # pose_emulator.py's odom_slip_ratio for the model), on top of the
-    # existing drift/jitter random-walk. Still a real slip-induced
-    # discrepancy on top of drift/jitter, just less severe than the
-    # initial value.
-    SLIP_RATIO = 0.25
-    try:
-        sim_tree, sentry_tree, helper = run_stack(
-            gui, backend, odom_noise_enabled=True, odom_slip_ratio=SLIP_RATIO)
-        if not wait_for_stack_ready(sc, helper):
-            sc.result(False, 'stack failed to reach a healthy /scan rate '
-                              'in time -- see log above')
-            return sc
-        pose = helper.wait_for_correction_tf(timeout=45.0)
-        if pose is None:
-            sc.result(False, f'{edge} never became available within 45s')
-            return sc
-
-        samples = []
-        OBSERVE_SECONDS = 60.0
-        # Real 4.0 m/s driving around PATROL_LEGS's mapped-safe loop (see
-        # its definition for the wall-clearance derivation), not the old
-        # timid 0.15 m/s wiggle near the start -- also keeps the
-        # distance-traveled gate opening throughout the window (a fully
-        # stationary robot wouldn't exercise periodic correction at all,
-        # see the jerk_stationary scenario for that case specifically).
-        t0 = time.monotonic()
-        i = 0
-        while time.monotonic() - t0 < OBSERVE_SECONDS:
-            vx, vy, duration = PATROL_LEGS[i % len(PATROL_LEGS)]
-            i += 1
-            helper.drive(vx, vy, duration)
-            p = helper.get_correction_tf(timeout=2.0)
-            if p is not None:
-                elapsed = time.monotonic() - t0
-                mag = math.hypot(p[0], p[1])
-                samples.append((elapsed, mag))
-                sc.log(f't={elapsed:5.1f}s  |{edge} xy|={mag:.4f} m')
-
-        if len(samples) < 3:
-            sc.result(False, f'too few {edge} samples ({len(samples)}) '
-                              'to assess boundedness')
-            return sc
-
-        mags = [m for _, m in samples]
-        max_mag = max(mags)
-        # "Bounded" check: compare the max of the second half of samples
-        # against the max of the first half. If the backend is correcting
-        # drift periodically, the second half shouldn't be substantially
-        # larger than the first -- growth would indicate corrections
-        # aren't keeping up (or aren't happening at all).
-        half = len(mags) // 2
-        first_half_max = max(mags[:half]) if half else mags[0]
-        second_half_max = max(mags[half:])
-        growth_ratio = second_half_max / max(first_half_max, 1e-6)
-
-        sim_errs = scan_log_for_errors(sim_tree.log_text(), 'sim')
-        sentry_errs = scan_log_for_errors(sentry_tree.log_text(), 'sentry_pkg')
-
-        GROWTH_THRESHOLD = 2.0  # second half shouldn't be >2x first half
-        ok = growth_ratio < GROWTH_THRESHOLD and not sim_errs and not sentry_errs
-        sc.result(ok,
-                   f'max|xy|={max_mag:.4f} m, first_half_max={first_half_max:.4f}, '
-                   f'second_half_max={second_half_max:.4f}, '
-                   f'growth_ratio={growth_ratio:.2f} (threshold {GROWTH_THRESHOLD}), '
-                   f'sim_errors={len(sim_errs)}, sentry_errors={len(sentry_errs)}')
-        return sc
-    finally:
-        teardown_stack(sim_tree, sentry_tree, helper)
-
-
 def scenario_jerk_with_motion(gui, backend):
     sc = Scenario('jerk_with_motion',
                   'trigger_jerk followed by small /cmd_vel motion: '
@@ -1200,8 +1113,7 @@ def _run_cornering_loop_scenario(sc, gui, backend, spawn_obstacle):
         sc.log('repositioned to the loop\'s start corner (-0.5,-0.5) '
                'before tracing its perimeter')
 
-        # Drive the loop. Sampling the correction TF each leg, same
-        # pattern as continuous_drift.
+        # Drive the loop. Sampling the correction TF each leg.
         OBSERVE_SECONDS = 45.0
         samples = []
         t0 = time.monotonic()
@@ -1296,7 +1208,6 @@ def scenario_drift_correction(gui, backend):
 
 SCENARIOS = {
     'baseline': scenario_baseline,
-    'continuous_drift': scenario_continuous_drift,
     'jerk_with_motion': scenario_jerk_with_motion,
     'jerk_stationary': scenario_jerk_stationary,
     'drift_correction_obstacle': scenario_drift_correction_obstacle,
