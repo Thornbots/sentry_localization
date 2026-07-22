@@ -84,10 +84,37 @@ isaac_ros_common/scripts/dexec.sh -- python3 \
   --backend slam   # or amcl, ekf
 ```
 
-Useful flags: `--scenario NAME` (run one scenario only), `--keep-running`
-(skip teardown for interactive follow-up), `--headless` (no gz-sim GUI —
-GUI is the default per the project's standing "watch sim live" rule, see
-`SESSION_NOTES.md`). Full usage/rationale in the script's own docstring.
+**After editing a `config/*.yaml` file, rebuild before rerunning the
+suite** — this package's `data_files` (config/launch/map) are copied at
+build time, not live-read from `src/`, so an edited YAML silently has no
+effect on the running container until a rebuild resyncs `install/`:
+
+```bash
+isaac_ros_common/scripts/dexec.sh -- colcon build --symlink-install \
+  --packages-select sentry_localization sentry_pkg
+```
+
+`--symlink-install` makes `install/` a symlink chain back to `src/` (via
+`build/`) for both this rebuild and every future one, so subsequent config
+edits take effect immediately with no rebuild needed — only the *first*
+build (or any build that didn't use `--symlink-install`) leaves a stale
+plain-copy trap. If a run's results look implausibly unaffected by a
+config change you just made, check `diff install/sentry_localization/
+share/sentry_localization/config/amcl.yaml src/sentry_localization/
+config/amcl.yaml` before assuming the change itself didn't work.
+
+Scenarios (`--scenario NAME` to run just one; all five run by default, in
+this order): `baseline`, `continuous_drift`, `jerk_with_motion`,
+`jerk_stationary`, `unmapped_obstacle`. Each scenario's exact pass
+condition and rationale is documented in the script's own module
+docstring (`SCENARIOS` section) — read that before interpreting a
+failure, since several of these assert a documented *limitation* (e.g.
+`jerk_stationary` should NOT correct) rather than "must work perfectly."
+
+Other useful flags: `--keep-running` (skip teardown for interactive
+follow-up), `--headless` (no gz-sim GUI — GUI is the default per the
+project's standing "watch sim live" rule, see `SESSION_NOTES.md`). Full
+usage/rationale in the script's own docstring.
 
 Standard `colcon test`-style checks (`ament_copyright`/`ament_flake8`/
 `ament_pep257`) also apply via the normal `colcon test --packages-select

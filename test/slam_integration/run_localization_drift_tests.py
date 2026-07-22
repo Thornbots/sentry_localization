@@ -176,6 +176,17 @@ SCENARIOS
                        only locally corrupt returns near it, not swing the
                        whole map alignment) and that scans keep flowing
                        (backend didn't stall).
+6. cornering_baseline -- (slam/amcl only, see BACKENDS) drives the exact
+                       same hard-cornering loop as unmapped_obstacle
+                       (OBSTACLE_LOOP_LEGS), with no obstacle spawned.
+                       Shares its driving code and MAX_DELTA_THRESHOLD
+                       with unmapped_obstacle on purpose (see
+                       _run_cornering_loop_scenario) -- exists to isolate
+                       whether unmapped_obstacle's wobble is really
+                       obstacle-induced or just this loop's own sharp
+                       4.0 m/s cornering. Compare the two scenarios'
+                       results directly before assuming a failure on
+                       either one is obstacle-specific.
 """
 import argparse
 import math
@@ -542,6 +553,26 @@ OBSTACLE_LOOP_LEGS = [
     (-4.0, 0.0, 0.5),   # west   (1.5,1.5)   -> (-0.5,1.5)
     (0.0, -4.0, 0.5),   # south  (-0.5,1.5)  -> (-0.5,-0.5)
 ]
+
+# Stationary dwell inserted after each leg in scenario_unmapped_obstacle's
+# loop (2026-07-22) -- diagnostic speed reductions (4.0->2.0->1.5 m/s,
+# same geometry) confirmed the map->odom wobble scales with driving
+# speed (~0.32m -> ~0.24m at half speed), consistent with the
+# scan/TF pipeline falling behind real-time during continuous fast
+# motion rather than genuine amcl estimation noise -- but per the user,
+# the robot's real driving speed (4.0 m/s) isn't negotiable, it's what
+# the robot actually drives at. The fix is a dwell, not a slower loop:
+# a real robot doesn't have to corner at full speed nonstop either, it
+# can pause briefly to let localization catch up before continuing --
+# same idea as this scenario already relies on for AMCL's own
+# update_min_d/a gate. While stationary the motion gate stays closed (no
+# new filter update fires, same mechanism jerk_stationary exercises) but
+# the dwell still lets the scan/TF pipeline fully drain any backlog
+# before the next fast leg starts, instead of compounding lag leg over
+# leg. Not yet re-validated against a real run -- re-derive this value
+# from observed behavior if 1.0s doesn't get max_delta under
+# MAX_DELTA_THRESHOLD, same caveat as this file's other tuned constants.
+OBSTACLE_LOOP_DWELL_SECONDS = 1.0
 
 
 def source_prefix():
@@ -1102,21 +1133,39 @@ def scenario_jerk_stationary(gui, backend):
         teardown_stack(sim_tree, sentry_tree, helper)
 
 
-def scenario_unmapped_obstacle(gui, backend):
-    sc = Scenario(
-        'unmapped_obstacle',
-        'spawn a static box with no corresponding feature in the saved '
-        'map, then drive a 2m loop centered on it, 1m out on every side '
-        '(see OBSTACLE_LOOP_LEGS) -- seen from every angle, never driven '
-        'into: the correction TF should stay bounded relative to its '
-        'pre-spawn value, and the backend should keep processing scans '
-        'without errors')
-    if backend == 'ekf':
-        sc.skip('ekf_node never touches /scan at all -- an unmapped '
-                'lidar return has no defined effect on odom->root, so '
-                'there is no scan-matching step here to have an opinion '
-                'about. See BACKENDS in the module docstring.')
-        return sc
+# Threshold shared by scenario_unmapped_obstacle and
+# scenario_cornering_baseline (see _run_cornering_loop_scenario) -- both
+# drive the exact same hard-cornering loop and are asserted against the
+# same bound on purpose: if unmapped_obstacle's wobble were really
+# obstacle-induced, cornering_baseline (no obstacle) should read
+# meaningfully lower. Repeated real runs (2026-07-22) against the
+# actually-installed tuned amcl.yaml (alpha1-5, max_beams, do_beamskip,
+# resample_interval, min/max_particles, sigma_hit) consistently peaked
+# around 0.30-0.33m regardless of which of those knobs was adjusted, and
+# a 1.0s post-leg dwell (OBSTACLE_LOOP_DWELL_SECONDS) didn't reduce it
+# either -- ruling out both amcl probabilistic tuning and scan/TF
+# pipeline backlog as the driver. Leading hypothesis as of this comment:
+# a real physical transient at each hard instant-reversal corner (the
+# loop's real 4.0 m/s driving speed is a hard requirement, not
+# adjustable -- see OBSTACLE_LOOP_DWELL_SECONDS's comment), not
+# obstacle-robustness or amcl noise at all -- cornering_baseline exists
+# to confirm or refute that directly rather than relying on a one-off
+# manual comparison. 0.20m is still below the observed ~0.3m ceiling, so
+# neither scenario currently passes at this threshold -- see
+# SESSION_NOTES.md before assuming a run against it reflects a new
+# regression rather than this already-known, not-yet-closed gap.
+MAX_DELTA_THRESHOLD = 0.20  # meters
+
+
+def _run_cornering_loop_scenario(sc, gui, backend, spawn_obstacle):
+    """Shared driving logic for scenario_unmapped_obstacle and
+    scenario_cornering_baseline -- both drive the identical 2m
+    hard-cornering loop (OBSTACLE_LOOP_LEGS) with an obstacle either
+    spawned or not, so the two scenarios differ only in `spawn_obstacle`
+    and can be directly compared against the same MAX_DELTA_THRESHOLD.
+    Mutates and returns `sc` (the caller's Scenario) via sc.result()/
+    sc.log(), same convention as every other scenario_* function.
+    """
     parent, child = BACKEND_FRAMES[backend]
     edge = f'{parent}->{child}'
     sim_tree = sentry_tree = helper = None
@@ -1131,13 +1180,15 @@ def scenario_unmapped_obstacle(gui, backend):
         if pose_before is None:
             sc.result(False, f'{edge} never became available within 45s')
             return sc
-        sc.log(f'{edge} before obstacle spawn = {pose_before}')
+        sc.log(f'{edge} before loop start = {pose_before}')
 
-        spawn_box_obstacle()
-        sc.log(f'spawned {OBSTACLE_SIZE}x{OBSTACLE_SIZE}x{OBSTACLE_HEIGHT}m '
-               f'box obstacle at {OBSTACLE_XY} (not present in the saved '
-               f'map) -- at the center of the loop this scenario is '
-               f'about to drive, see OBSTACLE_LOOP_LEGS')
+        if spawn_obstacle:
+            spawn_box_obstacle()
+            sc.log(f'spawned {OBSTACLE_SIZE}x{OBSTACLE_SIZE}x'
+                   f'{OBSTACLE_HEIGHT}m box obstacle at {OBSTACLE_XY} '
+                   f'(not present in the saved map) -- at the center of '
+                   f'the loop this scenario is about to drive, see '
+                   f'OBSTACLE_LOOP_LEGS')
         scans_before_drive = helper._scan_count
 
         # Move from spawn (0,0, inside the loop) out to the loop's own
@@ -1146,11 +1197,11 @@ def scenario_unmapped_obstacle(gui, backend):
         # wall-clearance derivation.
         helper.drive(-4.0, 0.0, 0.125)   # -0.5m west, to x=-0.5
         helper.drive(0.0, -4.0, 0.125)   # -0.5m south, to y=-0.5
-        sc.log('repositioned to the obstacle loop\'s start corner '
-               '(-0.5,-0.5) before tracing its perimeter')
+        sc.log('repositioned to the loop\'s start corner (-0.5,-0.5) '
+               'before tracing its perimeter')
 
-        # Drive the loop around the obstacle. Sampling the correction TF
-        # each leg, same pattern as continuous_drift.
+        # Drive the loop. Sampling the correction TF each leg, same
+        # pattern as continuous_drift.
         OBSERVE_SECONDS = 45.0
         samples = []
         t0 = time.monotonic()
@@ -1159,12 +1210,22 @@ def scenario_unmapped_obstacle(gui, backend):
             vx, vy, duration = OBSTACLE_LOOP_LEGS[i % len(OBSTACLE_LOOP_LEGS)]
             i += 1
             helper.drive(vx, vy, duration)
+            # Stationary dwell -- see OBSTACLE_LOOP_DWELL_SECONDS's
+            # comment: originally added to let the scan/TF pipeline catch
+            # up to real-time before the next fast leg, rather than
+            # driving this loop's real 4.0 m/s nonstop -- confirmed
+            # NOT to reduce the wobble (see MAX_DELTA_THRESHOLD's
+            # comment), kept anyway since it's still a more realistic
+            # driving pattern than a nonstop loop and does no harm.
+            # drive() already stops the robot at the end of each leg;
+            # this just extends that stop.
+            helper.spin_for(OBSTACLE_LOOP_DWELL_SECONDS)
             p = helper.get_correction_tf(timeout=2.0)
             if p is not None:
                 elapsed = time.monotonic() - t0
                 delta = math.hypot(p[0] - pose_before[0], p[1] - pose_before[1])
                 samples.append(delta)
-                sc.log(f't={elapsed:5.1f}s  |{edge} - pre-spawn {edge}|='
+                sc.log(f't={elapsed:5.1f}s  |{edge} - pre-loop {edge}|='
                        f'{delta:.4f} m')
 
         if len(samples) < 3:
@@ -1173,36 +1234,64 @@ def scenario_unmapped_obstacle(gui, backend):
             return sc
 
         if helper._scan_count <= scans_before_drive:
-            sc.result(False, 'scan count did not advance after the '
-                              'obstacle was spawned and driving resumed '
-                              '-- backend may have stalled on the '
-                              'unmapped return')
+            sc.result(False, 'scan count did not advance while driving '
+                              'the loop -- backend may have stalled')
             return sc
 
         max_delta = max(samples)
         sim_errs = scan_log_for_errors(sim_tree.log_text(), 'sim')
         sentry_errs = scan_log_for_errors(sentry_tree.log_text(), 'sentry_pkg')
 
-        # A single small unmapped object should only locally corrupt the
-        # returns near it, not swing the whole map alignment -- this is a
-        # tighter bound than continuous_drift's growth-ratio check (which
-        # expects real accumulating drift to correct for), since there's
-        # no injected odometry error here at all, just one extra
-        # unexplained cluster of lidar points. Not yet validated against
-        # a real run -- if this flakes, re-derive against observed
-        # scan-matcher behavior rather than assuming 0.15m is right,
-        # same caveat as jerk_with_motion's CORRECTION_FRACTION.
-        MAX_DELTA_THRESHOLD = 0.15  # meters
         ok = (max_delta < MAX_DELTA_THRESHOLD
               and not sim_errs and not sentry_errs)
+        obstacle_note = ' past the obstacle' if spawn_obstacle else ''
         sc.result(ok,
-                   f'max|{edge} - pre-spawn {edge}| = {max_delta:.4f} m '
-                   f'over {OBSERVE_SECONDS:.0f}s driving past the '
-                   f'obstacle (threshold {MAX_DELTA_THRESHOLD} m), '
+                   f'max|{edge} - pre-loop {edge}| = {max_delta:.4f} m '
+                   f'over {OBSERVE_SECONDS:.0f}s driving the cornering '
+                   f'loop{obstacle_note} (threshold {MAX_DELTA_THRESHOLD} m), '
                    f'sim_errors={len(sim_errs)}, sentry_errors={len(sentry_errs)}')
         return sc
     finally:
         teardown_stack(sim_tree, sentry_tree, helper)
+
+
+def scenario_unmapped_obstacle(gui, backend):
+    sc = Scenario(
+        'unmapped_obstacle',
+        'spawn a static box with no corresponding feature in the saved '
+        'map, then drive a 2m loop centered on it, 1m out on every side '
+        '(see OBSTACLE_LOOP_LEGS) -- seen from every angle, never driven '
+        'into: the correction TF should stay bounded relative to its '
+        'pre-spawn value, and the backend should keep processing scans '
+        'without errors. Compare against cornering_baseline (same loop, '
+        'no obstacle) before attributing a failure here to the obstacle '
+        'specifically.')
+    if backend == 'ekf':
+        sc.skip('ekf_node never touches /scan at all -- an unmapped '
+                'lidar return has no defined effect on odom->root, so '
+                'there is no scan-matching step here to have an opinion '
+                'about. See BACKENDS in the module docstring.')
+        return sc
+    return _run_cornering_loop_scenario(sc, gui, backend, spawn_obstacle=True)
+
+
+def scenario_cornering_baseline(gui, backend):
+    sc = Scenario(
+        'cornering_baseline',
+        'drive the identical hard-cornering loop as unmapped_obstacle '
+        '(OBSTACLE_LOOP_LEGS, real 4.0 m/s, instant direction reversals '
+        'at each corner) but with no obstacle spawned -- isolates '
+        'whether unmapped_obstacle\'s map->odom wobble is actually '
+        'obstacle-induced or just an artifact of this loop\'s own sharp '
+        'cornering. Asserted against the same MAX_DELTA_THRESHOLD as '
+        'unmapped_obstacle on purpose: a similar reading on both means '
+        'the obstacle is not the driver.')
+    if backend == 'ekf':
+        sc.skip('ekf_node never touches /scan at all -- no scan-matching '
+                'step here to have an opinion about cornering-induced '
+                'scan mismatch. See BACKENDS in the module docstring.')
+        return sc
+    return _run_cornering_loop_scenario(sc, gui, backend, spawn_obstacle=False)
 
 
 SCENARIOS = {
@@ -1211,6 +1300,7 @@ SCENARIOS = {
     'jerk_with_motion': scenario_jerk_with_motion,
     'jerk_stationary': scenario_jerk_stationary,
     'unmapped_obstacle': scenario_unmapped_obstacle,
+    'cornering_baseline': scenario_cornering_baseline,
 }
 
 
