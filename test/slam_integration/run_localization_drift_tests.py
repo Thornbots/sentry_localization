@@ -112,7 +112,11 @@ responsible for, not literally "map->odom" in every case:
     way and asserting against either the same-shape "must not change" or
     "must change to track the jerk" expectation would just be a guess --
     the EKF pipeline's own tuning/verification is still open work (see
-    SESSION_NOTES.md), revisit once that lands.
+    SESSION_NOTES.md), revisit once that lands. unmapped_obstacle is
+    SKIPPED for ekf too, for a simpler reason: ekf_node never touches
+    /scan at all, so an unmapped lidar return has no defined effect on
+    odom->root whatsoever -- there's no scan-matching step here to have
+    an opinion about.
   - 'mapping' is NOT a --backend choice here: mapping mode's job is
     building/refining a map, not evaluating localization accuracy against
     one, so these drift/jerk correction scenarios don't have a meaningful
@@ -155,6 +159,23 @@ SCENARIOS
                        observed the known limitation," not "localization
                        is broken" -- read the printed rationale in its
                        output before assuming a regression.
+5. unmapped_obstacle -- (slam/amcl only, see BACKENDS) spawn a static box
+                       into the running world mid-scenario (not present in
+                       ARCC_Field_2026.sdf or the saved ARCC26 map -- from
+                       the backend's perspective it's a lidar return with
+                       no corresponding map feature), then drive a 2m
+                       square loop centered on it (OBSTACLE_LOOP_LEGS, 1m
+                       out from the box in every direction -- see that
+                       constant's comment for the wall-clearance
+                       derivation) so it's seen from every angle but never
+                       driven into. This scenario is about the correction
+                       layer's reaction to a mismatch between map and
+                       reality, not a collision test. Assert the
+                       correction TF stays bounded relative to its
+                       pre-spawn value (one small unmapped object should
+                       only locally corrupt returns near it, not swing the
+                       whole map alignment) and that scans keep flowing
+                       (backend didn't stall).
 """
 import argparse
 import math
@@ -469,6 +490,59 @@ PATROL_LEGS = [
     (0.0, -4.0, 0.25),   # south  0,1   -> 0,0
 ]
 
+# scenario_unmapped_obstacle drives its OWN loop (OBSTACLE_LOOP_LEGS
+# below), not PATROL_LEGS -- earlier versions (2026-07-21) tried placing
+# the box off to the side of PATROL_LEGS's existing loop and reusing that
+# loop unshifted, then tried various reposition offsets to dodge it after
+# live testing showed collisions/overshoot -- simpler and more robust to
+# put the box at the loop's own center and size the loop 1m out from it
+# in every direction, so clearance is true by construction instead of by
+# a chain of one-off offset corrections.
+# OBSTACLE_XY = (0.5, 0.5) deliberately reuses PATROL_LEGS's own loop
+# center (its corners (0,0),(1,0),(1,1),(0,1) center on (0.5,0.5)) --
+# already-validated open space (continuous_drift/jerk_with_motion drive
+# through this immediate area for tens of seconds without incident), not
+# a new, untested spot.
+# NOT baked into ARCC_Field_2026.sdf or the saved ARCC26 map -- that's
+# the point: from the backend's perspective this is a lidar return with
+# no corresponding feature in the map it loaded.
+OBSTACLE_XY = (0.5, 0.5)
+OBSTACLE_SIZE = 0.3  # meters, x/y footprint
+# height, NOT a cube -- 2026-07-21: the original 0.3m cube (spanning
+# z=[0, 0.3], resting on the ground) sat entirely below the lidar's
+# mounted height (lidar link is offset ~0.35m above ground: body's own
+# ~0.16m + headlink's 0.252m + lidarlink's 0.072m, see
+# sim/urdf/sentry.urdf.xacro), so the single-plane 2D scan never actually
+# intersected the box at all -- it was invisible to the lidar the entire
+# time, which is why every unmapped_obstacle run and every do_beamskip/
+# alpha/max_beams tuning attempt showed the same wobble whether the box
+# was spawned or not. >0.6m tall, based at the ground (z=[0,
+# OBSTACLE_HEIGHT]), guarantees it spans the lidar's height with margin
+# on both sides regardless of the exact mount height.
+OBSTACLE_HEIGHT = 0.8  # meters
+
+# 2m square loop centered on OBSTACLE_XY, corners at (-0.5,-0.5),
+# (1.5,-0.5), (1.5,1.5), (-0.5,1.5) -- exactly 1m out from the box's
+# center on every side (box half-width 0.15m, so ~0.85m from each face).
+# Checked against this file's own documented wall clearances (see
+# PATROL_LEGS's comment; y-axis only, no x-axis data exists here):
+#   north edge y=1.5 -- 0.99m clear of upper_mid's wall at y=2.49.
+#   south edge y=-0.5 -- 0.5m short of PATROL_LEGS's own documented -1.0
+#     floor (which itself has a further 1.11m before lower_mid's wall),
+#     so comfortably inside already-established safe territory.
+#   x extent -0.5 to 1.5 -- only 0.5m beyond the already-validated
+#     x=[0,1] core on each side (unlike earlier abandoned +1/+2m east
+#     excursions), no wall data to check against but a much smaller,
+#     more conservative reach into unknown territory.
+# Legs are (vx, vy, duration) like PATROL_LEGS, but 2m per side (0.5s at
+# 4.0 m/s) since this loop's side length is 2m, not 1m.
+OBSTACLE_LOOP_LEGS = [
+    (4.0, 0.0, 0.5),    # east   (-0.5,-0.5) -> (1.5,-0.5)
+    (0.0, 4.0, 0.5),    # north  (1.5,-0.5)  -> (1.5,1.5)
+    (-4.0, 0.0, 0.5),   # west   (1.5,1.5)   -> (-0.5,1.5)
+    (0.0, -4.0, 0.5),   # south  (-0.5,1.5)  -> (-0.5,-0.5)
+]
+
 
 def source_prefix():
     return (
@@ -486,6 +560,48 @@ def launch_cmd(args_str):
     # still required since this process wasn't necessarily started from
     # an interactive login shell.
     return ['bash', '-lc', source_prefix() + args_str]
+
+
+# --------------------------------------------------------------------------
+# Obstacle spawning (mid-scenario, unmapped_obstacle scenario only).
+# --------------------------------------------------------------------------
+
+def spawn_box_obstacle(name='unmapped_test_obstacle', xy=OBSTACLE_XY,
+                        size=OBSTACLE_SIZE, height=OBSTACLE_HEIGHT,
+                        timeout=15.0):
+    """One-shot spawn of a static box into the running gz-sim world, via
+    the same `ros_gz_sim create -string <inline SDF>` mechanism
+    sim.launch.py's spawn_robot uses (-topic is documented broken for
+    this stack -- see that Node's comment / SESSION_NOTES.md) -- but run
+    directly as a subprocess here rather than as a launch Node, since
+    this needs to fire mid-scenario (after the pre-spawn baseline is
+    sampled), not at stack startup. <static>true</static>: no
+    physics/inertia needed, it should never move on its own. Torn down
+    for free when the scenario's full sim teardown kills the whole
+    gz-sim process group afterward -- no separate despawn needed.
+    size is the x/y footprint, height is z (NOT a cube -- see
+    OBSTACLE_HEIGHT's comment for why it must clear the lidar's mounted
+    height), based at the ground (z=[0, height]).
+    """
+    x, y = xy
+    sdf = (
+        '<sdf version="1.6"><model name="{name}"><static>true</static>'
+        '<pose>{x} {y} {z} 0 0 0</pose><link name="link">'
+        '<collision name="collision"><geometry><box><size>{s} {s} {h}'
+        '</size></box></geometry></collision>'
+        '<visual name="visual"><geometry><box><size>{s} {s} {h}</size>'
+        '</box></geometry><material><ambient>0.8 0.1 0.1 1</ambient>'
+        '<diffuse>0.8 0.1 0.1 1</diffuse></material></visual>'
+        '</link></model></sdf>'
+    ).format(name=name, x=x, y=y, z=height / 2.0, s=size, h=height)
+    cmd = (f'ros2 run ros_gz_sim create -string {shlex.quote(sdf)} '
+           f'-name {name} -allow_renaming false')
+    result = subprocess.run(
+        launch_cmd(cmd), capture_output=True, text=True, timeout=timeout)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f'spawning obstacle {name!r} failed (rc={result.returncode}): '
+            f'{result.stdout}\n{result.stderr}')
 
 
 class Scenario:
@@ -986,11 +1102,115 @@ def scenario_jerk_stationary(gui, backend):
         teardown_stack(sim_tree, sentry_tree, helper)
 
 
+def scenario_unmapped_obstacle(gui, backend):
+    sc = Scenario(
+        'unmapped_obstacle',
+        'spawn a static box with no corresponding feature in the saved '
+        'map, then drive a 2m loop centered on it, 1m out on every side '
+        '(see OBSTACLE_LOOP_LEGS) -- seen from every angle, never driven '
+        'into: the correction TF should stay bounded relative to its '
+        'pre-spawn value, and the backend should keep processing scans '
+        'without errors')
+    if backend == 'ekf':
+        sc.skip('ekf_node never touches /scan at all -- an unmapped '
+                'lidar return has no defined effect on odom->root, so '
+                'there is no scan-matching step here to have an opinion '
+                'about. See BACKENDS in the module docstring.')
+        return sc
+    parent, child = BACKEND_FRAMES[backend]
+    edge = f'{parent}->{child}'
+    sim_tree = sentry_tree = helper = None
+    try:
+        sim_tree, sentry_tree, helper = run_stack(
+            gui, backend, odom_noise_enabled=False)
+        if not wait_for_stack_ready(sc, helper):
+            sc.result(False, 'stack failed to reach a healthy /scan rate '
+                              'in time -- see log above')
+            return sc
+        pose_before = helper.wait_for_correction_tf(timeout=45.0)
+        if pose_before is None:
+            sc.result(False, f'{edge} never became available within 45s')
+            return sc
+        sc.log(f'{edge} before obstacle spawn = {pose_before}')
+
+        spawn_box_obstacle()
+        sc.log(f'spawned {OBSTACLE_SIZE}x{OBSTACLE_SIZE}x{OBSTACLE_HEIGHT}m '
+               f'box obstacle at {OBSTACLE_XY} (not present in the saved '
+               f'map) -- at the center of the loop this scenario is '
+               f'about to drive, see OBSTACLE_LOOP_LEGS')
+        scans_before_drive = helper._scan_count
+
+        # Move from spawn (0,0, inside the loop) out to the loop's own
+        # start corner (-0.5,-0.5) before tracing its perimeter -- see
+        # OBSTACLE_LOOP_LEGS's comment for the loop's full geometry and
+        # wall-clearance derivation.
+        helper.drive(-4.0, 0.0, 0.125)   # -0.5m west, to x=-0.5
+        helper.drive(0.0, -4.0, 0.125)   # -0.5m south, to y=-0.5
+        sc.log('repositioned to the obstacle loop\'s start corner '
+               '(-0.5,-0.5) before tracing its perimeter')
+
+        # Drive the loop around the obstacle. Sampling the correction TF
+        # each leg, same pattern as continuous_drift.
+        OBSERVE_SECONDS = 45.0
+        samples = []
+        t0 = time.monotonic()
+        i = 0
+        while time.monotonic() - t0 < OBSERVE_SECONDS:
+            vx, vy, duration = OBSTACLE_LOOP_LEGS[i % len(OBSTACLE_LOOP_LEGS)]
+            i += 1
+            helper.drive(vx, vy, duration)
+            p = helper.get_correction_tf(timeout=2.0)
+            if p is not None:
+                elapsed = time.monotonic() - t0
+                delta = math.hypot(p[0] - pose_before[0], p[1] - pose_before[1])
+                samples.append(delta)
+                sc.log(f't={elapsed:5.1f}s  |{edge} - pre-spawn {edge}|='
+                       f'{delta:.4f} m')
+
+        if len(samples) < 3:
+            sc.result(False, f'too few {edge} samples ({len(samples)}) to '
+                              'assess boundedness')
+            return sc
+
+        if helper._scan_count <= scans_before_drive:
+            sc.result(False, 'scan count did not advance after the '
+                              'obstacle was spawned and driving resumed '
+                              '-- backend may have stalled on the '
+                              'unmapped return')
+            return sc
+
+        max_delta = max(samples)
+        sim_errs = scan_log_for_errors(sim_tree.log_text(), 'sim')
+        sentry_errs = scan_log_for_errors(sentry_tree.log_text(), 'sentry_pkg')
+
+        # A single small unmapped object should only locally corrupt the
+        # returns near it, not swing the whole map alignment -- this is a
+        # tighter bound than continuous_drift's growth-ratio check (which
+        # expects real accumulating drift to correct for), since there's
+        # no injected odometry error here at all, just one extra
+        # unexplained cluster of lidar points. Not yet validated against
+        # a real run -- if this flakes, re-derive against observed
+        # scan-matcher behavior rather than assuming 0.15m is right,
+        # same caveat as jerk_with_motion's CORRECTION_FRACTION.
+        MAX_DELTA_THRESHOLD = 0.15  # meters
+        ok = (max_delta < MAX_DELTA_THRESHOLD
+              and not sim_errs and not sentry_errs)
+        sc.result(ok,
+                   f'max|{edge} - pre-spawn {edge}| = {max_delta:.4f} m '
+                   f'over {OBSERVE_SECONDS:.0f}s driving past the '
+                   f'obstacle (threshold {MAX_DELTA_THRESHOLD} m), '
+                   f'sim_errors={len(sim_errs)}, sentry_errors={len(sentry_errs)}')
+        return sc
+    finally:
+        teardown_stack(sim_tree, sentry_tree, helper)
+
+
 SCENARIOS = {
     'baseline': scenario_baseline,
     'continuous_drift': scenario_continuous_drift,
     'jerk_with_motion': scenario_jerk_with_motion,
     'jerk_stationary': scenario_jerk_stationary,
+    'unmapped_obstacle': scenario_unmapped_obstacle,
 }
 
 
