@@ -134,7 +134,12 @@ SCENARIOS
 2. jerk_with_motion -- (slam/amcl only, see BACKENDS) fire trigger_jerk,
                        then command a small amount of /cmd_vel motion.
                        Assert the correction TF produces a prompt, real
-                       correction whose magnitude tracks the jerk.
+                       correction whose magnitude tracks the jerk. Repeats
+                       this JERK_TRIAL_REPEATS times within a single
+                       launched stack (fresh random jerk draw each trial,
+                       see that constant's comment) -- ALL trials must
+                       pass, so one lucky/unlucky random draw can't flip
+                       the scenario's result either way.
 3. jerk_stationary  -- (slam/amcl only, see BACKENDS) fire trigger_jerk,
                        robot never moves afterward. Assert the correction
                        TF does NOT change. This is a KNOWN, EXPECTED,
@@ -150,7 +155,10 @@ SCENARIOS
                        PASS on this scenario means "the suite correctly
                        observed the known limitation," not "localization
                        is broken" -- read the printed rationale in its
-                       output before assuming a regression.
+                       output before assuming a regression. Also repeated
+                       JERK_TRIAL_REPEATS times (shorter 15s observation
+                       per trial rather than one 30s trial, see that
+                       constant's comment on scenario_jerk_stationary).
 4. drift_correction_obstacle -- (slam/amcl only, see BACKENDS) spawn a static box
                        into the running world mid-scenario (not present in
                        ARCC_Field_2026.sdf or the saved ARCC26 map -- from
@@ -818,11 +826,27 @@ def scenario_baseline(gui, backend):
         teardown_stack(sim_tree, sentry_tree, helper)
 
 
+# Number of independent jerk trials scenario_jerk_with_motion and
+# scenario_jerk_stationary each fire within a single launched stack
+# (2026-07-22, per the user: run the jerk tests more times to be
+# confident they work well, not just react correctly to one random
+# draw). Reused across a single run_stack()/teardown_stack() pair
+# rather than a fresh relaunch per trial -- trigger_jerk's (dx, dy) is
+# an independent random.gauss() draw each call (see pose_emulator.py),
+# so repeating it within one already-running stack already exercises a
+# fresh random magnitude/direction each time; relaunching per trial
+# would only add ~15-20s of launch/teardown overhead per repeat for no
+# added coverage. ALL trials must pass for the scenario to pass -- one
+# lucky/unlucky draw shouldn't be able to flip the result either way.
+JERK_TRIAL_REPEATS = 3
+
+
 def scenario_jerk_with_motion(gui, backend):
     sc = Scenario('jerk_with_motion',
-                  'trigger_jerk followed by small /cmd_vel motion: '
-                  'the correction TF should produce a prompt correction '
-                  'tracking the jerk magnitude')
+                  f'trigger_jerk followed by small /cmd_vel motion, '
+                  f'repeated {JERK_TRIAL_REPEATS}x: the correction TF '
+                  f'should produce a prompt correction tracking the jerk '
+                  f'magnitude on every trial')
     if backend == 'ekf':
         sc.skip('ekf fuses /odom directly with no distance-traveled gate '
                 'analogous to slam_toolbox/amcl -- its jerk response '
@@ -846,131 +870,141 @@ def scenario_jerk_with_motion(gui, backend):
             sc.result(False, 'stack failed to reach a healthy /scan rate '
                               'in time -- see log above')
             return sc
-        pose_before = helper.wait_for_correction_tf(timeout=45.0)
-        if pose_before is None:
-            sc.result(False, f'{edge} never became available within 45s')
-            return sc
-        sc.log(f'{edge} before jerk = {pose_before}')
 
-        applied_jerk_mag = helper.call_trigger_jerk_and_get_magnitude()
-        if applied_jerk_mag is not None:
-            sc.log(f'trigger_jerk called, actual applied |jerk| = '
-                   f'{applied_jerk_mag:.4f} m')
-        else:
-            sc.log('trigger_jerk called (could not parse actual applied '
-                   'magnitude from response; falling back to a '
-                   'stddev-based estimate)')
-            applied_jerk_mag = JERK_STDDEV
+        trial_results = []
+        for trial in range(1, JERK_TRIAL_REPEATS + 1):
+            sc.log(f'--- trial {trial}/{JERK_TRIAL_REPEATS} ---')
+            pose_before = helper.wait_for_correction_tf(timeout=45.0)
+            if pose_before is None:
+                trial_results.append(
+                    (False, f'trial {trial}: {edge} never became '
+                            f'available within 45s'))
+                continue
+            sc.log(f'{edge} before jerk = {pose_before}')
 
-        # Immediately after the jerk, with no motion yet, the correction
-        # TF should NOT have moved yet (this is the same gate as
-        # jerk_stationary -- included here just as a sanity check that
-        # the jerk itself didn't leak into reported odometry).
-        helper.spin_for(2.0)
-        pose_immediately_after = helper.get_correction_tf(timeout=2.0)
-        sc.log(f'{edge} ~2s after jerk, before motion = '
-               f'{pose_immediately_after}')
+            applied_jerk_mag = helper.call_trigger_jerk_and_get_magnitude()
+            if applied_jerk_mag is not None:
+                sc.log(f'trigger_jerk called, actual applied |jerk| = '
+                       f'{applied_jerk_mag:.4f} m')
+            else:
+                sc.log('trigger_jerk called (could not parse actual applied '
+                       'magnitude from response; falling back to a '
+                       'stddev-based estimate)')
+                applied_jerk_mag = JERK_STDDEV
 
-        # Now give it a small amount of real motion so the backend's
-        # distance-traveled gate opens and it attempts a fresh scan
-        # match. Measure relative to the PRE-JERK pose, not raw
-        # magnitude from the map origin -- the correction TF is not
-        # expected to sit at exact identity even with zero noise (the
-        # saved ARCC26 map's origin need not exactly coincide with sim's
-        # spawn pose, and ordinary scan-matching has some baseline give),
-        # so what actually indicates "did the jerk get corrected" is the
-        # CHANGE caused by the jerk, not its absolute value. The
-        # threshold is a fraction of the ACTUAL applied jerk magnitude
-        # (parsed from trigger_jerk's response above), not of
-        # odom_jerk_stddev -- comparing against the distribution
-        # parameter instead of the real draw was tried first and found
-        # flaky in practice (a single gauss() draw can land well under
-        # its own stddev), see git history for that iteration.
-        # 60s (rather than a tighter bound): this scenario was observed
-        # to be sensitive to unrelated CPU contention on the host from
-        # other, pre-existing interactive processes sharing the
-        # container (e.g. an rviz2 instance left running from earlier
-        # manual testing this session) -- under contention, scan
-        # processing can fall meaningfully behind wall-clock (observed
-        # directly for slam_toolbox: only 2 sensor registrations logged
-        # across an entire ~35s scenario run while contended, versus
-        # prompt, repeated re-registration when the box was quiet). A
-        # generous timeout keeps the assertion meaningful (it still
-        # fails a truly broken minimum_travel_distance/update_min_d
-        # config well within it, see this suite's validation run) without
-        # being a false failure purely because something unrelated was
-        # eating CPU on a shared dev box.
-        # CORRECTION_FRACTION = 0.3 (not 0.5): repeated validation runs
-        # this session showed slam_toolbox settling into a genuine but
-        # PARTIAL correction plateau, typically 40-70% of the true jerk
-        # magnitude rather than a full 100% snap-back (expected --
-        # scan-matching corrects the pose graph incrementally, and this
-        # scenario only gives it a small, brief wiggle motion rather than
-        # a full traverse). 0.5 sat right at the edge of that plateau and
-        # produced borderline false failures purely from run-to-run
-        # variance; 0.3 leaves comfortable margin below the observed
-        # plateau while still being far above what the KNOWN-BROKEN case
-        # (minimum_travel_distance reverted to 0.5, see this suite's
-        # validation run in the final report) ever produces, which was
-        # indistinguishable from zero. Not yet independently re-validated
-        # against amcl's own plateau behavior -- if amcl runs of this
-        # scenario turn out flaky, that's the first constant to revisit.
-        # CAVEAT (2026-07-20): all of the above was calibrated against the
-        # old 0.15 m/s / JERK_STDDEV=0.3 parameters. Both were since bumped
-        # to the robot's real top speed (4 m/s) and a larger worst-case
-        # jerk (0.5) to make this suite actually exercise realistic
-        # conditions -- if this scenario starts failing/flaking under the
-        # new parameters, re-derive the plateau fraction rather than
-        # assuming the old 0.3 still applies; faster driving and bigger
-        # jerks are not guaranteed to produce the same correction-fraction
-        # plateau.
-        CORRECTION_TIMEOUT = 60.0
-        CORRECTION_FRACTION = 0.3
-        correction_threshold = applied_jerk_mag * CORRECTION_FRACTION
-        t0 = time.monotonic()
-        max_seen = 0.0
-        corrected_pose = None
-        # Drive PATROL_LEGS's mapped-safe loop (holonomic chassis, real
-        # 4.0 m/s -- see its definition for the wall-clearance derivation)
-        # rather than pure back-and-forth wiggle on one axis -- a
-        # wiggle-in-place pattern was found to net very little actual
-        # displacement/geometric diversity for scan-matching to
-        # triangulate against, which correlated with slow/partial
-        # correction independent of host CPU load. A loop gives the
-        # backend multiple distinct vantage points against the map.
-        leg_i = 0
-        while time.monotonic() - t0 < CORRECTION_TIMEOUT:
-            vx, vy, duration = PATROL_LEGS[leg_i % len(PATROL_LEGS)]
-            leg_i += 1
-            helper.drive(vx, vy, duration)
-            p = helper.get_correction_tf(timeout=2.0)
-            if p is not None:
-                delta = math.hypot(p[0] - pose_before[0], p[1] - pose_before[1])
-                elapsed = time.monotonic() - t0
-                sc.log(f't={elapsed:5.1f}s since motion start  '
-                       f'|{edge} - pre-jerk {edge}|={delta:.4f} m')
-                if delta > max_seen:
-                    max_seen = delta
-                    corrected_pose = p
-                # Stop early once we've clearly seen a correction on the
-                # order of the actual applied jerk magnitude -- no need to
-                # keep driving.
-                if delta > correction_threshold:
-                    break
+            # Immediately after the jerk, with no motion yet, the
+            # correction TF should NOT have moved yet (this is the same
+            # gate as jerk_stationary -- included here just as a sanity
+            # check that the jerk itself didn't leak into reported
+            # odometry).
+            helper.spin_for(2.0)
+            pose_immediately_after = helper.get_correction_tf(timeout=2.0)
+            sc.log(f'{edge} ~2s after jerk, before motion = '
+                   f'{pose_immediately_after}')
 
-        elapsed_total = time.monotonic() - t0
+            # Now give it a small amount of real motion so the backend's
+            # distance-traveled gate opens and it attempts a fresh scan
+            # match. Measure relative to the PRE-JERK pose, not raw
+            # magnitude from the map origin -- the correction TF is not
+            # expected to sit at exact identity even with zero noise (the
+            # saved ARCC26 map's origin need not exactly coincide with sim's
+            # spawn pose, and ordinary scan-matching has some baseline give),
+            # so what actually indicates "did the jerk get corrected" is the
+            # CHANGE caused by the jerk, not its absolute value. The
+            # threshold is a fraction of the ACTUAL applied jerk magnitude
+            # (parsed from trigger_jerk's response above), not of
+            # odom_jerk_stddev -- comparing against the distribution
+            # parameter instead of the real draw was tried first and found
+            # flaky in practice (a single gauss() draw can land well under
+            # its own stddev), see git history for that iteration.
+            # 60s (rather than a tighter bound): this scenario was observed
+            # to be sensitive to unrelated CPU contention on the host from
+            # other, pre-existing interactive processes sharing the
+            # container (e.g. an rviz2 instance left running from earlier
+            # manual testing this session) -- under contention, scan
+            # processing can fall meaningfully behind wall-clock (observed
+            # directly for slam_toolbox: only 2 sensor registrations logged
+            # across an entire ~35s scenario run while contended, versus
+            # prompt, repeated re-registration when the box was quiet). A
+            # generous timeout keeps the assertion meaningful (it still
+            # fails a truly broken minimum_travel_distance/update_min_d
+            # config well within it, see this suite's validation run) without
+            # being a false failure purely because something unrelated was
+            # eating CPU on a shared dev box.
+            # CORRECTION_FRACTION = 0.3 (not 0.5): repeated validation runs
+            # this session showed slam_toolbox settling into a genuine but
+            # PARTIAL correction plateau, typically 40-70% of the true jerk
+            # magnitude rather than a full 100% snap-back (expected --
+            # scan-matching corrects the pose graph incrementally, and this
+            # scenario only gives it a small, brief wiggle motion rather than
+            # a full traverse). 0.5 sat right at the edge of that plateau and
+            # produced borderline false failures purely from run-to-run
+            # variance; 0.3 leaves comfortable margin below the observed
+            # plateau while still being far above what the KNOWN-BROKEN case
+            # (minimum_travel_distance reverted to 0.5, see this suite's
+            # validation run in the final report) ever produces, which was
+            # indistinguishable from zero. Not yet independently re-validated
+            # against amcl's own plateau behavior -- if amcl runs of this
+            # scenario turn out flaky, that's the first constant to revisit.
+            # CAVEAT (2026-07-20): all of the above was calibrated against the
+            # old 0.15 m/s / JERK_STDDEV=0.3 parameters. Both were since bumped
+            # to the robot's real top speed (4 m/s) and a larger worst-case
+            # jerk (0.5) to make this suite actually exercise realistic
+            # conditions -- if this scenario starts failing/flaking under the
+            # new parameters, re-derive the plateau fraction rather than
+            # assuming the old 0.3 still applies; faster driving and bigger
+            # jerks are not guaranteed to produce the same correction-fraction
+            # plateau.
+            CORRECTION_TIMEOUT = 60.0
+            CORRECTION_FRACTION = 0.3
+            correction_threshold = applied_jerk_mag * CORRECTION_FRACTION
+            t0 = time.monotonic()
+            max_seen = 0.0
+            # Drive PATROL_LEGS's mapped-safe loop (holonomic chassis, real
+            # 4.0 m/s -- see its definition for the wall-clearance derivation)
+            # rather than pure back-and-forth wiggle on one axis -- a
+            # wiggle-in-place pattern was found to net very little actual
+            # displacement/geometric diversity for scan-matching to
+            # triangulate against, which correlated with slow/partial
+            # correction independent of host CPU load. A loop gives the
+            # backend multiple distinct vantage points against the map.
+            leg_i = 0
+            while time.monotonic() - t0 < CORRECTION_TIMEOUT:
+                vx, vy, duration = PATROL_LEGS[leg_i % len(PATROL_LEGS)]
+                leg_i += 1
+                helper.drive(vx, vy, duration)
+                p = helper.get_correction_tf(timeout=2.0)
+                if p is not None:
+                    delta = math.hypot(p[0] - pose_before[0], p[1] - pose_before[1])
+                    elapsed = time.monotonic() - t0
+                    sc.log(f't={elapsed:5.1f}s since motion start  '
+                           f'|{edge} - pre-jerk {edge}|={delta:.4f} m')
+                    if delta > max_seen:
+                        max_seen = delta
+                    # Stop early once we've clearly seen a correction on the
+                    # order of the actual applied jerk magnitude -- no need to
+                    # keep driving.
+                    if delta > correction_threshold:
+                        break
+
+            elapsed_total = time.monotonic() - t0
+            trial_ok = max_seen > correction_threshold
+            trial_results.append(
+                (trial_ok,
+                 f'trial {trial}: max delta {max_seen:.4f} m within '
+                 f'{elapsed_total:.1f}s (threshold {correction_threshold:.4f} m '
+                 f'= {CORRECTION_FRACTION}x applied jerk {applied_jerk_mag:.4f} m)'))
+
         sim_errs = scan_log_for_errors(sim_tree.log_text(), 'sim')
         sentry_errs = scan_log_for_errors(sentry_tree.log_text(), 'sentry_pkg')
 
-        ok = (max_seen > correction_threshold
+        n_pass = sum(1 for trial_ok, _ in trial_results if trial_ok)
+        ok = (n_pass == JERK_TRIAL_REPEATS
               and not sim_errs and not sentry_errs)
+        summary = '; '.join(detail for _, detail in trial_results)
         sc.result(ok,
-                   f'max|{edge} - pre-jerk {edge}| reached '
-                   f'{max_seen:.4f} m within {elapsed_total:.1f}s of '
-                   f'resumed motion (threshold {correction_threshold:.4f} m '
-                   f'= {CORRECTION_FRACTION}x actual applied jerk magnitude '
-                   f'{applied_jerk_mag:.4f} m), sim_errors={len(sim_errs)}, '
-                   f'sentry_errors={len(sentry_errs)}')
+                   f'{n_pass}/{JERK_TRIAL_REPEATS} trials passed -- {summary} '
+                   f'-- sim_errors={len(sim_errs)}, sentry_errors={len(sentry_errs)}')
         return sc
     finally:
         teardown_stack(sim_tree, sentry_tree, helper)
@@ -979,9 +1013,10 @@ def scenario_jerk_with_motion(gui, backend):
 def scenario_jerk_stationary(gui, backend):
     sc = Scenario(
         'jerk_stationary',
-        'trigger_jerk with robot never moving afterward: the correction '
-        'TF must NOT change -- this is a KNOWN, EXPECTED, DOCUMENTED '
-        "structural limitation of the backend's scan-matching gate "
+        f'trigger_jerk with robot never moving afterward, repeated '
+        f'{JERK_TRIAL_REPEATS}x: the correction TF must NOT change on '
+        f'any trial -- this is a KNOWN, EXPECTED, DOCUMENTED structural '
+        "limitation of the backend's scan-matching gate "
         '(minimum_travel_distance/heading or update_min_d/a are measured '
         'off REPORTED odometry, which a jerk deliberately leaves '
         'unchanged), so a PASS here means "the suite correctly '
@@ -998,6 +1033,16 @@ def scenario_jerk_stationary(gui, backend):
     parent, child = BACKEND_FRAMES[backend]
     edge = f'{parent}->{child}'
     sim_tree = sentry_tree = helper = None
+    # 15s/trial (was a single 30s observation) -- shorter per trial since
+    # this is now repeated JERK_TRIAL_REPEATS times rather than once (see
+    # that constant's comment): the mechanism being tested here is "does
+    # the gate ever open with zero reported motion" -- a binary yes/no
+    # that either holds from the start of the observation window or
+    # doesn't, it doesn't need a long window to become more convincing on
+    # any single trial the way e.g. continuous_drift's boundedness check
+    # would. More independent trials at 15s each is a better use of the
+    # same total wall-clock than fewer trials at 30s each.
+    OBSERVE_SECONDS = 15.0
     try:
         sim_tree, sentry_tree, helper = run_stack(
             gui, backend, odom_noise_enabled=False,
@@ -1006,40 +1051,51 @@ def scenario_jerk_stationary(gui, backend):
             sc.result(False, 'stack failed to reach a healthy /scan rate '
                               'in time -- see log above')
             return sc
-        pose_before = helper.wait_for_correction_tf(timeout=45.0)
-        if pose_before is None:
-            sc.result(False, f'{edge} never became available within 45s')
-            return sc
-        sc.log(f'{edge} before jerk = {pose_before}')
 
-        helper.call_trigger_jerk()
-        sc.log('trigger_jerk called; robot will NOT move afterward')
+        trial_results = []
+        for trial in range(1, JERK_TRIAL_REPEATS + 1):
+            sc.log(f'--- trial {trial}/{JERK_TRIAL_REPEATS} ---')
+            pose_before = helper.wait_for_correction_tf(timeout=45.0)
+            if pose_before is None:
+                trial_results.append(
+                    (False, f'trial {trial}: {edge} never became '
+                            f'available within 45s'))
+                continue
+            sc.log(f'{edge} before jerk = {pose_before}')
 
-        OBSERVE_SECONDS = 30.0
-        t0 = time.monotonic()
-        max_drift_from_before = 0.0
-        while time.monotonic() - t0 < OBSERVE_SECONDS:
-            helper.spin_for(2.0)
-            p = helper.get_correction_tf(timeout=2.0)
-            if p is not None:
-                d = math.hypot(p[0] - pose_before[0], p[1] - pose_before[1])
-                max_drift_from_before = max(max_drift_from_before, d)
-        sc.log(f'max |{edge} - pre-jerk {edge}| over '
-               f'{OBSERVE_SECONDS:.0f}s = {max_drift_from_before:.4f} m')
+            helper.call_trigger_jerk()
+            sc.log('trigger_jerk called; robot will NOT move afterward')
+
+            t0 = time.monotonic()
+            max_drift_from_before = 0.0
+            while time.monotonic() - t0 < OBSERVE_SECONDS:
+                helper.spin_for(2.0)
+                p = helper.get_correction_tf(timeout=2.0)
+                if p is not None:
+                    d = math.hypot(p[0] - pose_before[0], p[1] - pose_before[1])
+                    max_drift_from_before = max(max_drift_from_before, d)
+            sc.log(f'max |{edge} - pre-jerk {edge}| over '
+                   f'{OBSERVE_SECONDS:.0f}s = {max_drift_from_before:.4f} m')
+
+            NO_CHANGE_THRESHOLD = 0.02  # near-zero tolerance, meters
+            trial_ok = max_drift_from_before < NO_CHANGE_THRESHOLD
+            trial_results.append(
+                (trial_ok,
+                 f'trial {trial}: stayed within {max_drift_from_before:.4f} m '
+                 f'over {OBSERVE_SECONDS:.0f}s (threshold {NO_CHANGE_THRESHOLD} m)'))
 
         sim_errs = scan_log_for_errors(sim_tree.log_text(), 'sim')
         sentry_errs = scan_log_for_errors(sentry_tree.log_text(), 'sentry_pkg')
 
-        NO_CHANGE_THRESHOLD = 0.02  # near-zero tolerance, meters
-        ok = (max_drift_from_before < NO_CHANGE_THRESHOLD
+        n_pass = sum(1 for trial_ok, _ in trial_results if trial_ok)
+        ok = (n_pass == JERK_TRIAL_REPEATS
               and not sim_errs and not sentry_errs)
+        summary = '; '.join(detail for _, detail in trial_results)
         sc.result(ok,
-                   f'{edge} stayed within {max_drift_from_before:.4f} m '
-                   f'of its pre-jerk value over {OBSERVE_SECONDS:.0f}s '
-                   f'(threshold {NO_CHANGE_THRESHOLD} m) -- EXPECTED: with '
-                   f'zero reported motion, the scan-match gate never '
-                   f'opens, so it never even attempts to notice the '
-                   f'jerk. sim_errors={len(sim_errs)}, '
+                   f'{n_pass}/{JERK_TRIAL_REPEATS} trials passed -- {summary} '
+                   f'-- EXPECTED: with zero reported motion, the '
+                   f'scan-match gate never opens, so it never even '
+                   f'attempts to notice the jerk. sim_errors={len(sim_errs)}, '
                    f'sentry_errors={len(sentry_errs)}')
         return sc
     finally:
