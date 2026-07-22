@@ -103,13 +103,17 @@ config change you just made, check `diff install/sentry_localization/
 share/sentry_localization/config/amcl.yaml src/sentry_localization/
 config/amcl.yaml` before assuming the change itself didn't work.
 
-Scenarios (`--scenario NAME` to run just one; all five run by default, in
+Scenarios (`--scenario NAME` to run just one; all six run by default, in
 this order): `baseline`, `continuous_drift`, `jerk_with_motion`,
-`jerk_stationary`, `unmapped_obstacle`. Each scenario's exact pass
-condition and rationale is documented in the script's own module
-docstring (`SCENARIOS` section) — read that before interpreting a
-failure, since several of these assert a documented *limitation* (e.g.
-`jerk_stationary` should NOT correct) rather than "must work perfectly."
+`jerk_stationary`, `drift_correction_obstacle`, `drift_correction`. Each
+scenario's exact pass condition and rationale is documented in the
+script's own module docstring (`SCENARIOS` section) — read that before
+interpreting a failure, since several of these assert a documented
+*limitation* (e.g. `jerk_stationary` should NOT correct) rather than
+"must work perfectly." `drift_correction` shares its driving loop and
+threshold with `drift_correction_obstacle` on purpose — compare the two
+directly before attributing a failure on either to the obstacle
+specifically.
 
 Other useful flags: `--keep-running` (skip teardown for interactive
 follow-up), `--headless` (no gz-sim GUI — GUI is the default per the

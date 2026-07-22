@@ -112,7 +112,7 @@ responsible for, not literally "map->odom" in every case:
     way and asserting against either the same-shape "must not change" or
     "must change to track the jerk" expectation would just be a guess --
     the EKF pipeline's own tuning/verification is still open work (see
-    SESSION_NOTES.md), revisit once that lands. unmapped_obstacle is
+    SESSION_NOTES.md), revisit once that lands. drift_correction_obstacle is
     SKIPPED for ekf too, for a simpler reason: ekf_node never touches
     /scan at all, so an unmapped lidar return has no defined effect on
     odom->root whatsoever -- there's no scan-matching step here to have
@@ -159,7 +159,7 @@ SCENARIOS
                        observed the known limitation," not "localization
                        is broken" -- read the printed rationale in its
                        output before assuming a regression.
-5. unmapped_obstacle -- (slam/amcl only, see BACKENDS) spawn a static box
+5. drift_correction_obstacle -- (slam/amcl only, see BACKENDS) spawn a static box
                        into the running world mid-scenario (not present in
                        ARCC_Field_2026.sdf or the saved ARCC26 map -- from
                        the backend's perspective it's a lidar return with
@@ -176,13 +176,13 @@ SCENARIOS
                        only locally corrupt returns near it, not swing the
                        whole map alignment) and that scans keep flowing
                        (backend didn't stall).
-6. cornering_baseline -- (slam/amcl only, see BACKENDS) drives the exact
-                       same hard-cornering loop as unmapped_obstacle
+6. drift_correction -- (slam/amcl only, see BACKENDS) drives the exact
+                       same hard-cornering loop as drift_correction_obstacle
                        (OBSTACLE_LOOP_LEGS), with no obstacle spawned.
                        Shares its driving code and MAX_DELTA_THRESHOLD
-                       with unmapped_obstacle on purpose (see
+                       with drift_correction_obstacle on purpose (see
                        _run_cornering_loop_scenario) -- exists to isolate
-                       whether unmapped_obstacle's wobble is really
+                       whether drift_correction_obstacle's wobble is really
                        obstacle-induced or just this loop's own sharp
                        4.0 m/s cornering. Compare the two scenarios'
                        results directly before assuming a failure on
@@ -501,7 +501,7 @@ PATROL_LEGS = [
     (0.0, -4.0, 0.25),   # south  0,1   -> 0,0
 ]
 
-# scenario_unmapped_obstacle drives its OWN loop (OBSTACLE_LOOP_LEGS
+# scenario_drift_correction_obstacle drives its OWN loop (OBSTACLE_LOOP_LEGS
 # below), not PATROL_LEGS -- earlier versions (2026-07-21) tried placing
 # the box off to the side of PATROL_LEGS's existing loop and reusing that
 # loop unshifted, then tried various reposition offsets to dodge it after
@@ -525,7 +525,7 @@ OBSTACLE_SIZE = 0.3  # meters, x/y footprint
 # ~0.16m + headlink's 0.252m + lidarlink's 0.072m, see
 # sim/urdf/sentry.urdf.xacro), so the single-plane 2D scan never actually
 # intersected the box at all -- it was invisible to the lidar the entire
-# time, which is why every unmapped_obstacle run and every do_beamskip/
+# time, which is why every drift_correction_obstacle run and every do_beamskip/
 # alpha/max_beams tuning attempt showed the same wobble whether the box
 # was spawned or not. >0.6m tall, based at the ground (z=[0,
 # OBSTACLE_HEIGHT]), guarantees it spans the lidar's height with margin
@@ -554,7 +554,7 @@ OBSTACLE_LOOP_LEGS = [
     (0.0, -4.0, 0.5),   # south  (-0.5,1.5)  -> (-0.5,-0.5)
 ]
 
-# Stationary dwell inserted after each leg in scenario_unmapped_obstacle's
+# Stationary dwell inserted after each leg in scenario_drift_correction_obstacle's
 # loop (2026-07-22) -- diagnostic speed reductions (4.0->2.0->1.5 m/s,
 # same geometry) confirmed the map->odom wobble scales with driving
 # speed (~0.32m -> ~0.24m at half speed), consistent with the
@@ -594,7 +594,7 @@ def launch_cmd(args_str):
 
 
 # --------------------------------------------------------------------------
-# Obstacle spawning (mid-scenario, unmapped_obstacle scenario only).
+# Obstacle spawning (mid-scenario, drift_correction_obstacle scenario only).
 # --------------------------------------------------------------------------
 
 def spawn_box_obstacle(name='unmapped_test_obstacle', xy=OBSTACLE_XY,
@@ -1133,11 +1133,11 @@ def scenario_jerk_stationary(gui, backend):
         teardown_stack(sim_tree, sentry_tree, helper)
 
 
-# Threshold shared by scenario_unmapped_obstacle and
-# scenario_cornering_baseline (see _run_cornering_loop_scenario) -- both
+# Threshold shared by scenario_drift_correction_obstacle and
+# scenario_drift_correction (see _run_cornering_loop_scenario) -- both
 # drive the exact same hard-cornering loop and are asserted against the
-# same bound on purpose: if unmapped_obstacle's wobble were really
-# obstacle-induced, cornering_baseline (no obstacle) should read
+# same bound on purpose: if drift_correction_obstacle's wobble were really
+# obstacle-induced, drift_correction (no obstacle) should read
 # meaningfully lower. Repeated real runs (2026-07-22) against the
 # actually-installed tuned amcl.yaml (alpha1-5, max_beams, do_beamskip,
 # resample_interval, min/max_particles, sigma_hit) consistently peaked
@@ -1148,7 +1148,7 @@ def scenario_jerk_stationary(gui, backend):
 # a real physical transient at each hard instant-reversal corner (the
 # loop's real 4.0 m/s driving speed is a hard requirement, not
 # adjustable -- see OBSTACLE_LOOP_DWELL_SECONDS's comment), not
-# obstacle-robustness or amcl noise at all -- cornering_baseline exists
+# obstacle-robustness or amcl noise at all -- drift_correction exists
 # to confirm or refute that directly rather than relying on a one-off
 # manual comparison. 0.20m is still below the observed ~0.3m ceiling, so
 # neither scenario currently passes at this threshold -- see
@@ -1158,8 +1158,8 @@ MAX_DELTA_THRESHOLD = 0.20  # meters
 
 
 def _run_cornering_loop_scenario(sc, gui, backend, spawn_obstacle):
-    """Shared driving logic for scenario_unmapped_obstacle and
-    scenario_cornering_baseline -- both drive the identical 2m
+    """Shared driving logic for scenario_drift_correction_obstacle and
+    scenario_drift_correction -- both drive the identical 2m
     hard-cornering loop (OBSTACLE_LOOP_LEGS) with an obstacle either
     spawned or not, so the two scenarios differ only in `spawn_obstacle`
     and can be directly compared against the same MAX_DELTA_THRESHOLD.
@@ -1255,15 +1255,15 @@ def _run_cornering_loop_scenario(sc, gui, backend, spawn_obstacle):
         teardown_stack(sim_tree, sentry_tree, helper)
 
 
-def scenario_unmapped_obstacle(gui, backend):
+def scenario_drift_correction_obstacle(gui, backend):
     sc = Scenario(
-        'unmapped_obstacle',
+        'drift_correction_obstacle',
         'spawn a static box with no corresponding feature in the saved '
         'map, then drive a 2m loop centered on it, 1m out on every side '
         '(see OBSTACLE_LOOP_LEGS) -- seen from every angle, never driven '
         'into: the correction TF should stay bounded relative to its '
         'pre-spawn value, and the backend should keep processing scans '
-        'without errors. Compare against cornering_baseline (same loop, '
+        'without errors. Compare against drift_correction (same loop, '
         'no obstacle) before attributing a failure here to the obstacle '
         'specifically.')
     if backend == 'ekf':
@@ -1275,16 +1275,16 @@ def scenario_unmapped_obstacle(gui, backend):
     return _run_cornering_loop_scenario(sc, gui, backend, spawn_obstacle=True)
 
 
-def scenario_cornering_baseline(gui, backend):
+def scenario_drift_correction(gui, backend):
     sc = Scenario(
-        'cornering_baseline',
-        'drive the identical hard-cornering loop as unmapped_obstacle '
+        'drift_correction',
+        'drive the identical hard-cornering loop as drift_correction_obstacle '
         '(OBSTACLE_LOOP_LEGS, real 4.0 m/s, instant direction reversals '
         'at each corner) but with no obstacle spawned -- isolates '
-        'whether unmapped_obstacle\'s map->odom wobble is actually '
+        'whether drift_correction_obstacle\'s map->odom wobble is actually '
         'obstacle-induced or just an artifact of this loop\'s own sharp '
         'cornering. Asserted against the same MAX_DELTA_THRESHOLD as '
-        'unmapped_obstacle on purpose: a similar reading on both means '
+        'drift_correction_obstacle on purpose: a similar reading on both means '
         'the obstacle is not the driver.')
     if backend == 'ekf':
         sc.skip('ekf_node never touches /scan at all -- no scan-matching '
@@ -1299,8 +1299,8 @@ SCENARIOS = {
     'continuous_drift': scenario_continuous_drift,
     'jerk_with_motion': scenario_jerk_with_motion,
     'jerk_stationary': scenario_jerk_stationary,
-    'unmapped_obstacle': scenario_unmapped_obstacle,
-    'cornering_baseline': scenario_cornering_baseline,
+    'drift_correction_obstacle': scenario_drift_correction_obstacle,
+    'drift_correction': scenario_drift_correction,
 }
 
 
