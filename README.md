@@ -71,54 +71,12 @@ rationale and every other mode's exact node/TF-ownership behavior.
 
 ## Testing
 
-`test/slam_integration/run_localization_drift_tests.py` is a standalone
-integration suite (not part of `colcon test`) that launches `sim` +
-`sentry_pkg` (which includes this package) end to end and exercises
-localization drift/jerk-correction behavior against synthetic odometry
-noise. Run after tuning `config/slam.yaml`, `config/amcl.yaml`,
-`config/ekf.yaml`, or `sim/pose_emulator.py`'s noise model:
-
-```bash
-isaac_ros_common/scripts/dexec.sh -- python3 \
-  /workspaces/isaac_ros-dev/src/sentry_localization/test/slam_integration/run_localization_drift_tests.py \
-  --backend slam   # or amcl, ekf
-```
-
-**After editing a `config/*.yaml` file, rebuild before rerunning the
-suite** — this package's `data_files` (config/launch/map) are copied at
-build time, not live-read from `src/`, so an edited YAML silently has no
-effect on the running container until a rebuild resyncs `install/`:
-
-```bash
-isaac_ros_common/scripts/dexec.sh -- colcon build --symlink-install \
-  --packages-select sentry_localization sentry_pkg
-```
-
-`--symlink-install` makes `install/` a symlink chain back to `src/` (via
-`build/`) for both this rebuild and every future one, so subsequent config
-edits take effect immediately with no rebuild needed — only the *first*
-build (or any build that didn't use `--symlink-install`) leaves a stale
-plain-copy trap. If a run's results look implausibly unaffected by a
-config change you just made, check `diff install/sentry_localization/
-share/sentry_localization/config/amcl.yaml src/sentry_localization/
-config/amcl.yaml` before assuming the change itself didn't work.
-
-Scenarios (`--scenario NAME` to run just one; all five run by default, in
-this order): `baseline`, `jerk_with_motion`, `jerk_stationary`,
-`drift_correction_obstacle`, `drift_correction`. Each
-scenario's exact pass condition and rationale is documented in the
-script's own module docstring (`SCENARIOS` section) — read that before
-interpreting a failure, since several of these assert a documented
-*limitation* (e.g. `jerk_stationary` should NOT correct) rather than
-"must work perfectly." `drift_correction` shares its driving loop and
-threshold with `drift_correction_obstacle` on purpose — compare the two
-directly before attributing a failure on either to the obstacle
-specifically.
-
-Other useful flags: `--keep-running` (skip teardown for interactive
-follow-up), `--headless` (no gz-sim GUI — GUI is the default per the
-project's standing "watch sim live" rule, see `SESSION_NOTES.md`). Full
-usage/rationale in the script's own docstring.
+The localization drift/jerk-correction integration suite moved to
+`sim/test/localization/run_localization_drift_tests.py` — see
+`sim/README.md`'s Testing section for usage. It still launches this
+package (via `sentry_pkg`'s `auto.launch.py`) and reads its
+`config/*.yaml` files, so the same "rebuild after editing config" caveat
+documented there applies to `sentry_localization` specifically.
 
 Standard `colcon test`-style checks (`ament_copyright`/`ament_flake8`/
 `ament_pep257`) also apply via the normal `colcon test --packages-select
