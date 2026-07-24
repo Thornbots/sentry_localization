@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+UDP-only transport profile (no shared-memory transport). passthrough_odom_publisher
+hangs in rcl_node_init -> FastDDS SharedMemTransport::CreateInputChannelResource
+on startup once /dev/shm accumulates many stale fastrtps_* segments from prior
+SIGKILLed runs -- the hang happens before rclpy.spin() even starts, so
+SIGINT/SIGTERM are never handled. Same fix and same root cause as
+sentry_pkg/config/fastdds_no_shm.xml (pose_translator/odom_tf_broadcaster) --
+kept as this package's own copy rather than reaching into sentry_pkg's share
+dir, since it's a small static file and this package has no other dependency
+on sentry_pkg. Applied to just this node via FASTRTPS_DEFAULT_PROFILES_FILE
+in localization.launch.py.
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+    <profiles>
+        <transport_descriptors>
+            <transport_descriptor>
+                <transport_id>udp_only</transport_id>
+                <type>UDPv4</type>
+            </transport_descriptor>
+        </transport_descriptors>
+        <participant profile_name="udp_only_participant" is_default_profile="true">
+            <rtps>
+                <userTransports>
+                    <transport_id>udp_only</transport_id>
+                </userTransports>
+                <useBuiltinTransports>false</useBuiltinTransports>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>

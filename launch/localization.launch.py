@@ -179,6 +179,14 @@ def generate_launch_description():
                      "localization_mode:=ekf."
     )
 
+    # FASTRTPS_DEFAULT_PROFILES_FILE forces UDP-only transport (no shared
+    # memory) -- this node has been observed hanging in rcl_node_init/
+    # FastDDS SharedMemTransport::CreateInputChannelResource on startup,
+    # before rclpy.spin() even runs, once /dev/shm accumulates many stale
+    # fastrtps_* segments from earlier SIGKILLed runs -- SIGINT/SIGTERM are
+    # never handled because the hang is below the Python signal-check
+    # point. Same fix as sentry_pkg's pose_translator/odom_tf_broadcaster
+    # (see config/fastdds_no_shm.xml).
     passthrough_odom_node = Node(
         package="sentry_localization",
         executable="passthrough_odom_publisher",
@@ -186,6 +194,11 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(passthrough_selected),
         parameters=[{"use_sim_time": use_sim_time}],
+        additional_env={
+            "FASTRTPS_DEFAULT_PROFILES_FILE": os.path.join(
+                pkg_share, "config", "fastdds_no_shm.xml"
+            )
+        },
     )
 
     ekf_node = Node(
