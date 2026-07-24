@@ -29,7 +29,6 @@ setup(
         'console_scripts': [
             'slam_relocalize_publisher = sentry_localization.slam_relocalize_publisher:main',
             'simple_relocalize_publisher = sentry_localization.simple_relocalize_publisher:main',
-            'head_home_scan_gate = sentry_localization.head_home_scan_gate:main',
             'passthrough_odom_publisher = sentry_localization.passthrough_odom_publisher:main',
         ],
     },

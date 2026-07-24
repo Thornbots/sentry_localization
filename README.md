@@ -37,13 +37,12 @@ ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 | `amcl` | `nav2_amcl` + `nav2_map_server` | `passthrough_odom_publisher` | particle-filter localization against a saved occupancy grid |
 | `ekf` | *(none — no map frame)* | `ekf_node` (`robot_localization`, fuses `/odom` + `/scan_odom`, remapped output) | odometry fusion only, no map |
 
-`ekf` mode also launches `rf2o_laser_odometry_node` (`/scan_odom`) and
-`head_home_scan_gate` (gates lidar input to `rf2o` to only when the head
-is near its home/yaw≈0 position — `rf2o` caches its `lidar->root`
-transform once on the first scan, so it can't tolerate an arbitrarily
-moving head-mounted lidar). See the `home_yaw_tolerance` arg and the
-module docstring in `launch/localization.launch.py` for the full
-rationale and every other mode's exact node/TF-ownership behavior.
+`ekf` mode also launches `rf2o_laser_odometry_node` (`/scan_odom`),
+consuming raw `/scan` directly — it re-queries its `lidar->root` transform
+every scan (Thornbots/rf2o_laser_odometry fork), so it tolerates the
+head-mounted lidar moving independently of the base. See the module
+docstring in `launch/localization.launch.py` for the full rationale and
+every other mode's exact node/TF-ownership behavior.
 
 ### Other useful args
 
@@ -63,9 +62,6 @@ rationale and every other mode's exact node/TF-ownership behavior.
 
 - `passthrough_odom_publisher.py` — relays `/odom` onto
   `/localization/odom` unchanged. Used in `slam`/`mapping`/`amcl` modes.
-- `head_home_scan_gate.py` — republishes raw `/scan` onto `/scan_gated`
-  only while the head is near home (yaw), for feeding `rf2o` safely.
-  Only used in `localization_mode:=ekf`.
 - `slam_relocalize_publisher.py` / `simple_relocalize_publisher.py` —
   relocalization helpers (see each file's docstring for specifics).
 
