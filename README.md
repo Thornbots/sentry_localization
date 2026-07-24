@@ -62,8 +62,13 @@ every other mode's exact node/TF-ownership behavior.
 
 - `passthrough_odom_publisher.py` — relays `/odom` onto
   `/localization/odom` unchanged. Used in `slam`/`mapping`/`amcl` modes.
-- `slam_relocalize_publisher.py` / `simple_relocalize_publisher.py` —
-  relocalization helpers (see each file's docstring for specifics).
+- `simple_relocalize_publisher.py` — relocalization helper (see the file's
+  docstring for specifics). The backend-agnostic drift-correction relay
+  that used to live here as `slam_relocalize_publisher.py` (SLAM-specific,
+  compared a `map->root` TF against the MCB's raw pose) has moved to
+  `sentry_pkg/mcb_relay.py`, which compares `/localization/odom` (this
+  package's one guaranteed output, any backend) against `/odom` directly
+  instead of a TF lookup — see `sentry_pkg/README.md`.
 
 ## Testing
 
