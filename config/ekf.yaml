@@ -7,15 +7,18 @@
 ###     heading -- see ARCC_2026_SENTRY_CONTEXT.md's "Our Sentry's
 ###     drivetrain"), so /odom's orientation field is always identity and
 ###     carries no information -- don't fuse yaw/vyaw from this source.
-###   odom1 (/scan_odom, from rf2o_laser_odometry): x, y, yaw. rf2o only
-###     ever sees scans while the head is near home (head_home_scan_gate,
-###     see SESSION_NOTES.md), so /scan_odom updates in bursts during
-###     head-home windows, not continuously -- treat it as an occasional
-###     absolute-ish correction, not a steady high-rate stream. Yaw is
-###     fused despite the chassis's heading being physically fixed, per
-###     user direction -- the low yaw process noise below still keeps yaw
-###     tightly trusted overall, this just lets rf2o's yaw estimate
-###     contribute during its update bursts rather than being ignored.
+###   odom1 (/scan_odom, from rf2o_laser_odometry): x, y, yaw. rf2o consumes
+###     raw /scan continuously -- it used to be gated to only the windows
+###     where the head was near home (head_home_scan_gate), because rf2o
+###     cached the lidar->base transform once at startup and never
+###     re-queried it, which broke the moment our head-mounted lidar moved.
+###     That's fixed upstream now (Thornbots/rf2o_laser_odometry re-queries
+###     the transform every scan, see SESSION_NOTES.md), so /scan_odom is a
+###     steady stream again, not bursty. Yaw is fused despite the chassis's
+###     heading being physically fixed, per user direction -- the low yaw
+###     process noise below still keeps yaw tightly trusted overall, this
+###     just lets rf2o's yaw estimate contribute continuously rather than
+###     being ignored.
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0

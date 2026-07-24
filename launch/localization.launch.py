@@ -57,17 +57,17 @@ who (if anyone) owns map->odom TF, and what ends up on /localization/odom:
     not launched in this mode, ekf_node's own output is /localization/odom.
     This mode also launches rf2o_laser_odometry_node (turns /scan into a
     second odometry-shaped estimate on /scan_odom, scan-matching, no TF
-    broadcast of its own) and head_home_scan_gate. rf2o only samples the
-    lidar->root transform once, on its first received scan, and reuses
-    that cached transform for its lifetime -- it assumes a rigidly-fixed
-    sensor mount, which our head-mounted lidar isn't (see
-    SESSION_NOTES.md). head_home_scan_gate feeds rf2o a filtered
-    /scan_gated instead of raw /scan, forwarding scans only while the
-    head is near its home (yaw ~ 0) position, so every scan rf2o ever
-    sees (including its first, which fixes the cached transform) is
-    consistent with that one head angle. Neither node is launched in any
-    other localization_mode -- nothing else reads /scan_odom or
-    /scan_gated.
+    broadcast of its own), consuming raw /scan directly. rf2o used to only
+    sample the lidar->root transform once, on its first received scan, and
+    reuse that cached transform for its lifetime -- it assumed a
+    rigidly-fixed sensor mount, which our head-mounted lidar isn't (see
+    SESSION_NOTES.md). That's now fixed in Thornbots/rf2o_laser_odometry
+    (the fork isaac_ros_common's Dockerfile builds), which re-queries the
+    transform every scan instead -- so the head_home_scan_gate workaround
+    (only forwarding scans while the head was near home, via a filtered
+    /scan_gated topic) is no longer needed and has been removed. Not
+    launched in any other localization_mode -- nothing else reads
+    /scan_odom.
 """
 import os
 
@@ -169,16 +169,6 @@ def generate_launch_description():
         ["'", LaunchConfiguration("map_file"), "' + '.yaml'"]
     )
 
-    home_yaw_tolerance_arg = DeclareLaunchArgument(
-        "home_yaw_tolerance", default_value="0.05",
-        description="Max |head_yaw| (radians) for head_home_scan_gate to "
-                     "treat the head as 'home' and forward scans to rf2o. "
-                     "Keeps every scan rf2o ever sees consistent with the "
-                     "single lidar->root transform it caches on its first "
-                     "scan (see module docstring). Only used when "
-                     "localization_mode:=ekf."
-    )
-
     passthrough_odom_node = Node(
         package="sentry_localization",
         executable="passthrough_odom_publisher",
@@ -209,22 +199,7 @@ def generate_launch_description():
         ],
     )
 
-    # Only used by localization_mode:=ekf; nothing else reads /scan_odom
-    # or /scan_gated.
-    head_home_scan_gate_node = Node(
-        package="sentry_localization",
-        executable="head_home_scan_gate",
-        name="head_home_scan_gate",
-        output="screen",
-        condition=IfCondition(ekf_selected),
-        parameters=[{
-            "use_sim_time": use_sim_time,
-            "home_yaw_tolerance": ParameterValue(
-                LaunchConfiguration("home_yaw_tolerance"), value_type=float
-            ),
-        }],
-    )
-
+    # Only used by localization_mode:=ekf; nothing else reads /scan_odom.
     scan_odom_node = Node(
         package="rf2o_laser_odometry",
         executable="rf2o_laser_odometry_node",
@@ -232,7 +207,7 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(ekf_selected),
         parameters=[{
-            "laser_scan_topic": "/scan_gated",
+            "laser_scan_topic": "/scan",
             "odom_topic": "/scan_odom",
             "publish_tf": False,
             "base_frame_id": "root",
@@ -340,9 +315,8 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
-        home_yaw_tolerance_arg,
         passthrough_odom_node, ekf_node,
-        head_home_scan_gate_node, scan_odom_node,
+        scan_odom_node,
         slam_toolbox_with_map_node, slam_toolbox_no_map_node,
         map_server_node, amcl_node, amcl_lifecycle_manager_node,
     ])
