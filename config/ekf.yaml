@@ -42,7 +42,23 @@ ekf_filter_node:
 
     odom0: /odom
     # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
-    odom0_config: [true,  true,  false,
+    #
+    # VELOCITY ONLY -- x/y deliberately NOT fused from this source.
+    #
+    # Wheel odometry's dominant error mode here is slip (the arena's "Bumpy
+    # Road" zone; modelled by sim's odom_slip_ratio), which is an error in
+    # *integrated distance*. Fusing this source's absolute x/y makes that
+    # slip part of the filter's absolute position estimate directly, and
+    # since it accumulates monotonically no amount of covariance tuning
+    # lets /scan_odom pull it back -- the filter converges onto the slipped
+    # position and the whole point of fusing a scan matcher is lost.
+    # Measured 2026-07-25: driving ~42m in a straight line with
+    # odom_slip_ratio=0.05, ekf output tracked /odom to within 0.001m while
+    # both sat 2.02m (= 5% of 42m) behind ground truth.
+    # Fusing velocity instead lets wheel encoders do what they are good at
+    # (smooth, high-rate short-term motion) while /scan_odom below owns
+    # absolute position, which is what actually corrects slip.
+    odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
                    false, false, false,
