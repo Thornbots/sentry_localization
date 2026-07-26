@@ -58,8 +58,18 @@ ekf_filter_node:
     # Fusing velocity instead lets wheel encoders do what they are good at
     # (smooth, high-rate short-term motion) while /scan_odom below owns
     # absolute position, which is what actually corrects slip.
+    # Yaw IS fused from this source, despite /odom's orientation always
+    # being identity. That identity is not "no information" -- it is the
+    # true, physically-guaranteed heading: the chassis is holonomic and
+    # never rotates during a match. Pinning yaw here matters because
+    # robot_localization rotates this source's body-frame velocity into the
+    # world using the filter's yaw estimate, so a wrong yaw integrates
+    # velocity in the wrong direction. Measured 2026-07-25 with yaw instead
+    # taken from /scan_odom: rf2o's yaw was off by ~pi and the entire
+    # estimate came out as the trajectory rotated 180 degrees (mean error
+    # 2.97m vs raw odometry's 0.22m).
     odom0_config: [false, false, false,
-                   false, false, false,
+                   false, false, true,
                    true,  true,  false,
                    false, false, false,
                    false, false, false]
@@ -67,8 +77,12 @@ ekf_filter_node:
     odom0_relative: false
 
     odom1: /scan_odom
+    # Position only -- yaw deliberately NOT fused from rf2o. Its yaw was
+    # measured off by ~pi (see odom0_config above), and the chassis heading
+    # is pinned by odom0 anyway, so there is nothing for rf2o's yaw to
+    # contribute except error.
     odom1_config: [true,  true,  false,
-                   false, false, true,
+                   false, false, false,
                    false, false, false,
                    false, false, false,
                    false, false, false]
