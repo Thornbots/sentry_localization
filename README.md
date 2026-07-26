@@ -28,21 +28,33 @@ relevant args. Direct use (e.g. for testing) looks like:
 ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 ```
 
-### `localization_mode` — pick the whole localization scheme
+### `localization_mode` — pick the map->odom owner (independent of `use_ekf`)
 
-| value | map->odom owner | /localization/odom source | use case |
-|---|---|---|---|
-| `slam` (default) | `slam_toolbox` (localization mode) | `passthrough_odom_publisher` (relays `/odom`) | normal running mode, localizing against the saved field map |
-| `mapping` | `slam_toolbox` (mapping mode) | `passthrough_odom_publisher` | deliberately (re)building/extending the map |
-| `amcl` | `nav2_amcl` + `nav2_map_server` | `passthrough_odom_publisher` | particle-filter localization against a saved occupancy grid |
-| `ekf` | *(none — no map frame)* | `ekf_node` (`robot_localization`, fuses `/odom` + `/scan_odom`, remapped output) | odometry fusion only, no map |
+| value | map->odom owner | use case |
+|---|---|---|
+| `slam` (default) | `slam_toolbox` (localization mode) | normal running mode, localizing against the saved field map |
+| `mapping` | `slam_toolbox` (mapping mode) | deliberately (re)building/extending the map |
+| `amcl` | `nav2_amcl` + `nav2_map_server` | particle-filter localization against a saved occupancy grid |
+| `none` | *(none — no map frame)* | no map layer at all (e.g. odometry-fusion-only running, paired with `use_ekf:=true`) |
 
-`ekf` mode also launches `rf2o_laser_odometry_node` (`/scan_odom`),
+### `use_ekf` — pick the odom->root source (independent of `localization_mode`)
+
+| value | /localization/odom source | use case |
+|---|---|---|
+| `false` (default) | `passthrough_odom_publisher` (relays `/odom` unchanged) | trust raw wheel odometry |
+| `true` | `ekf_node` (`robot_localization`, fuses `/odom` + `/scan_odom`, remapped output) | EKF-fused odometry, layered on top of any `localization_mode` above |
+
+`use_ekf:=true` also launches `rf2o_laser_odometry_node` (`/scan_odom`),
 consuming raw `/scan` directly — it re-queries its `lidar->root` transform
 every scan (Thornbots/rf2o_laser_odometry fork), so it tolerates the
 head-mounted lidar moving independently of the base. See `## Notes` below
 for the full rationale and every other mode's exact node/TF-ownership
 behavior.
+
+The old map-free "ekf mode" configuration is now reached as
+`localization_mode:=none use_ekf:=true`; any of `slam`/`amcl` combined
+with `use_ekf:=true` is also a valid, launchable combination (a map
+backend plus EKF-fused odometry underneath it).
 
 ### Other useful args
 
@@ -61,7 +73,8 @@ behavior.
 ## Nodes (`sentry_localization/`)
 
 - `passthrough_odom_publisher.py` — relays `/odom` onto
-  `/localization/odom` unchanged. Used in `slam`/`mapping`/`amcl` modes.
+  `/localization/odom` unchanged. Used whenever `use_ekf:=false`, any
+  `localization_mode`.
 - `simple_relocalize_publisher.py` — relocalization helper (see the file's
   docstring for specifics). The backend-agnostic drift-correction relay
   that used to live here as `slam_relocalize_publisher.py` (SLAM-specific,
@@ -91,7 +104,7 @@ before changing a value back to something already tried and rejected.
 
 ### `launch/localization.launch.py` — per-mode map/load_map/lifecycle detail
 
-Beyond the `localization_mode` table and ekf/rf2o summary above:
+Beyond the `localization_mode`/`use_ekf` tables and rf2o summary above:
 
 - `slam` with `load_map:=false` is not a meaningful combination — there's
   no map to localize against in that mode.
@@ -99,8 +112,9 @@ Beyond the `localization_mode` table and ekf/rf2o summary above:
   no concept of starting blank, unlike `slam_toolbox`.
 - `use_map_saver` is only turned on in `mapping` mode — the map is only
   ever savable/updatable when you've deliberately opted into mapping,
-  never as a side effect of ordinary localization/amcl/ekf running.
-- `ekf` mode runs no map node at all, so `load_map` has no effect there.
+  never as a side effect of ordinary localization/amcl/none running.
+- `localization_mode:=none` runs no map node at all, so `load_map` has no
+  effect there.
 - `map_server` and `amcl` are nav2 lifecycle nodes, brought up by a
   `lifecycle_manager` node (`autostart:true`) rather than starting active
   on their own.
