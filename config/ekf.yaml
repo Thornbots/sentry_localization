@@ -1,24 +1,12 @@
-### First-pass EKF config -- not final tuning. Covariance/process-noise
-### numbers below are reasonable starting guesses, not measured/validated.
+### First-pass EKF config -- not final tuning; covariance/process-noise
+### numbers are starting guesses, not measured/validated.
 ###
 ### Fuses two odometry-shaped sources into odom->root:
-###   odom0 (/odom, from pose_translator/wheel odometry): x, y, vx, vy only.
-###     Chassis is holonomic and never rotates during a match (fixed
-###     heading -- see ARCC_2026_SENTRY_CONTEXT.md's "Our Sentry's
-###     drivetrain"), so /odom's orientation field is always identity and
-###     carries no information -- don't fuse yaw/vyaw from this source.
-###   odom1 (/scan_odom, from rf2o_laser_odometry): x, y, yaw. rf2o consumes
-###     raw /scan continuously -- it used to be gated to only the windows
-###     where the head was near home (head_home_scan_gate), because rf2o
-###     cached the lidar->base transform once at startup and never
-###     re-queried it, which broke the moment our head-mounted lidar moved.
-###     That's fixed upstream now (Thornbots/rf2o_laser_odometry re-queries
-###     the transform every scan, see SESSION_NOTES.md), so /scan_odom is a
-###     steady stream again, not bursty. Yaw is fused despite the chassis's
-###     heading being physically fixed, per user direction -- the low yaw
-###     process noise below still keeps yaw tightly trusted overall, this
-###     just lets rf2o's yaw estimate contribute continuously rather than
-###     being ignored.
+###   odom0 (/odom, wheel odometry): x, y, vx, vy only. Chassis is
+###     holonomic with fixed heading, so orientation is always identity.
+###   odom1 (/scan_odom, rf2o_laser_odometry): x, y, yaw, fused continuously.
+### See README.md Notes for source rationale and why yaw is still fused
+### from /odom despite its identity orientation.
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
@@ -43,31 +31,12 @@ ekf_filter_node:
     odom0: /odom
     # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
     #
-    # VELOCITY ONLY -- x/y deliberately NOT fused from this source.
-    #
-    # Wheel odometry's dominant error mode here is slip (the arena's "Bumpy
-    # Road" zone; modelled by sim's odom_slip_ratio), which is an error in
-    # *integrated distance*. Fusing this source's absolute x/y makes that
-    # slip part of the filter's absolute position estimate directly, and
-    # since it accumulates monotonically no amount of covariance tuning
-    # lets /scan_odom pull it back -- the filter converges onto the slipped
-    # position and the whole point of fusing a scan matcher is lost.
-    # Measured 2026-07-25: driving ~42m in a straight line with
-    # odom_slip_ratio=0.05, ekf output tracked /odom to within 0.001m while
-    # both sat 2.02m (= 5% of 42m) behind ground truth.
-    # Fusing velocity instead lets wheel encoders do what they are good at
-    # (smooth, high-rate short-term motion) while /scan_odom below owns
-    # absolute position, which is what actually corrects slip.
-    # Yaw IS fused from this source, despite /odom's orientation always
-    # being identity. That identity is not "no information" -- it is the
-    # true, physically-guaranteed heading: the chassis is holonomic and
-    # never rotates during a match. Pinning yaw here matters because
-    # robot_localization rotates this source's body-frame velocity into the
-    # world using the filter's yaw estimate, so a wrong yaw integrates
-    # velocity in the wrong direction. Measured 2026-07-25 with yaw instead
-    # taken from /scan_odom: rf2o's yaw was off by ~pi and the entire
-    # estimate came out as the trajectory rotated 180 degrees (mean error
-    # 2.97m vs raw odometry's 0.22m).
+    # VELOCITY ONLY -- x/y deliberately NOT fused from this source (wheel
+    # slip would otherwise get baked into absolute position irrecoverably).
+    # Yaw IS fused despite /odom's orientation always being identity --
+    # that identity is the true, physically-guaranteed heading, and a
+    # wrong yaw here misdirects velocity integration. See README.md Notes
+    # for the measured drift/error numbers behind both choices.
     odom0_config: [false, false, false,
                    false, false, true,
                    true,  true,  false,

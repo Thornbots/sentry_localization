@@ -1,73 +1,9 @@
 """
-Turns /odom + /scan into odom->root, and (for the map-based backends)
-map->odom -- the localization scheme selected by localization_mode.
-Included by sentry_pkg/launch/auto.launch.py, which owns getting /pose
-and /scan onto the graph (real hardware or sim) and the robot description;
-this package only ever consumes /odom (published by sentry_pkg's
-pose_translator) + /scan, no direct hardware/description dependency.
-
-Regardless of backend, the localized result is always published on
-/localization/odom (nav_msgs/Odometry) -- sentry_pkg's odom_tf_broadcaster
-subscribes that single topic and broadcasts the actual odom->root TF, so
-it never needs to know which localization_mode is active.
-
-load_map:=true by default: deserializes map_file's saved pose graph
-(map/ARCC26.posegraph + .data under this package, saved via
-slam_toolbox/srv/SerializePoseGraph) at startup and continues from it
-instead of starting blank, since ARCC26 is the sentry's actual field map.
-Only affects the slam/mapping localization_mode values below (slam_toolbox
-always either loads or doesn't); amcl always loads map_file's .yaml
-regardless (it has no concept of starting blank), and ekf mode doesn't run
-any map node at all so load_map has no effect there.
-
-localization_mode picks the whole localization scheme in one choice --
-who (if anyone) owns map->odom TF, and what ends up on /localization/odom:
-  - 'slam' (default): slam_toolbox in its own 'localization' mode owns
-    map->odom, localizing root against the existing map_file rather than
-    building/extending it -- the normal running mode once ARCC26 is a
-    good-enough field map. passthrough_odom_publisher relays /odom onto
-    /localization/odom unchanged (root pose is uncorrected wheel
-    odometry in this mode). Requires load_map:=true with a real
-    map_file -- 'slam' with load_map:=false is not a meaningful
-    combination (there's no map to localize against).
-  - 'mapping': slam_toolbox in its own 'mapping' mode owns map->odom,
-    (re)building/extending the map instead of just localizing against it
-    -- pair with load_map:=true to refine ARCC26, or load_map:=false to
-    build a fresh one from scratch. This should be an occasional,
-    deliberate action, not the default. use_map_saver is only turned on
-    in this mode (see below) -- the map is only ever savable/updatable
-    when you've deliberately opted into mapping, never as a side effect
-    of ordinary localization/amcl/ekf running. passthrough_odom_publisher
-    relays /odom, same as 'slam'.
-  - 'amcl': nav2's map_server + amcl own map->odom instead, localizing
-    root against map_file's saved occupancy grid (<map_file>.yaml, same
-    basename slam_toolbox's posegraph uses). slam_toolbox isn't launched
-    at all in this mode -- AMCL never builds a map, only localizes
-    against one. map_server and amcl are nav2 lifecycle nodes, brought up
-    by a lifecycle_manager node (autostart:true) rather than starting
-    active on their own. passthrough_odom_publisher relays /odom, same
-    as 'slam'/'mapping'.
-  - 'ekf': no map->odom node runs at all (no slam_toolbox, no amcl/
-    map_server/lifecycle_manager -- the map frame doesn't exist in this
-    mode). Instead, ekf_node (robot_localization, config/ekf.yaml) fuses
-    /odom (x, y, vx, vy) and /scan_odom (x, y) and publishes the result
-    directly onto /localization/odom (remapped from its default
-    odometry/filtered topic; publish_tf:false since TF broadcasting
-    happens in sentry_pkg, not here) -- passthrough_odom_publisher is
-    not launched in this mode, ekf_node's own output is /localization/odom.
-    This mode also launches rf2o_laser_odometry_node (turns /scan into a
-    second odometry-shaped estimate on /scan_odom, scan-matching, no TF
-    broadcast of its own), consuming raw /scan directly. rf2o used to only
-    sample the lidar->root transform once, on its first received scan, and
-    reuse that cached transform for its lifetime -- it assumed a
-    rigidly-fixed sensor mount, which our head-mounted lidar isn't (see
-    SESSION_NOTES.md). That's now fixed in Thornbots/rf2o_laser_odometry
-    (the fork isaac_ros_common's Dockerfile builds), which re-queries the
-    transform every scan instead -- so the head_home_scan_gate workaround
-    (only forwarding scans while the head was near home, via a filtered
-    /scan_gated topic) is no longer needed and has been removed. Not
-    launched in any other localization_mode -- nothing else reads
-    /scan_odom.
+Turns /odom + /scan into odom->root, and (for map-based backends)
+map->odom -- scheme picked by localization_mode (slam/mapping/amcl/ekf).
+Result always published on /localization/odom regardless of backend.
+load_map:=true (default) loads map_file's saved pose graph at startup.
+See README.md's localization_mode table/Notes section for per-mode detail.
 """
 import os
 
