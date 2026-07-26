@@ -7,15 +7,10 @@ class PassthroughOdomPublisher(Node):
     """
     Relays /odom onto /localization/odom unchanged.
 
-    Used for localization_mode in {slam, mapping, amcl}: root pose in
-    these modes is uncorrected wheel odometry (only map->odom is
-    corrected, via slam_toolbox/amcl scan-matching, which those nodes
-    broadcast directly). sentry_pkg's odom_tf_broadcaster always reads
-    /localization/odom regardless of backend, so this relay exists purely
-    to give it something to subscribe to in the modes that don't
-    otherwise correct odom->root -- localization_mode:=ekf publishes
-    /localization/odom itself instead (ekf_node's remapped output), so
-    this node isn't launched there.
+    Used for localization_mode in {slam, mapping, amcl}, where root pose
+    is uncorrected wheel odometry (only map->odom is corrected, by
+    slam_toolbox/amcl directly). Not launched for localization_mode:=ekf,
+    which publishes /localization/odom itself instead.
     """
 
     def __init__(self):

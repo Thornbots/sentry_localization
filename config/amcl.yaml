@@ -17,28 +17,10 @@ amcl:
     # the wrong shape for this robot. OmniMotionModel adds a dedicated
     # strafe noise term instead.
     robot_model_type: "nav2_amcl::OmniMotionModel"
-    # alpha1-5: stock 0.2. TRIED lowering all five to 0.05 on 2026-07-21
-    # to fight unmapped_obstacle's ~0.3-0.4m map->odom wobble (diagnosed
-    # as motion-model noise fighting this sim's near-perfect,
-    # odom_noise_enabled=false odometry, not an obstacle-robustness
-    # issue -- see git history) -- 0.05 crashed amcl outright,
-    # reproducibly: "amcl: ./src/pf/pf_kdtree.c:363: pf_kdtree_cluster:
-    # Assertion `node == pf_kdtree_find_node(self, self->root,
-    # node->key)' failed", process dies with SIGABRT during startup
-    # Configuring/initTransforms, before any driving even starts. This is
-    # a known class of nav2_amcl bug where alpha values too low let
-    # resampling collapse particle diversity enough to break the
-    # kd-tree clustering's node-uniqueness invariant. Binary-searched
-    # back up from there to 0.0875 (the current value) -- the lowest
-    # step that didn't reproduce the crash across repeated startups.
-    # Also validated against continuous_drift (real injected
-    # drift/jitter/slip) to confirm this didn't cost genuine
-    # noise-responsiveness -- still passes cleanly (growth_ratio ~1.0-
-    # 1.1). If pushing lower again, step down gradually (e.g. 0.075,
-    # then 0.0625) and check for the pf_kdtree crash at each step, not
-    # straight to an aggressive value, AND validate against
-    # continuous_drift alongside unmapped_obstacle so a fix for one
-    # doesn't regress the other.
+    # alpha1-5: 0.0875 (stock 0.2). Lower values (tried 0.05) crash amcl
+    # via a pf_kdtree particle-diversity bug; 0.0875 is the lowest
+    # binary-searched step that doesn't. See README.md Notes for the
+    # crash signature and retuning steps.
     alpha1: 0.0875
     alpha2: 0.0875
     alpha3: 0.0875
@@ -73,70 +55,34 @@ amcl:
     max_beams: 180
     laser_likelihood_max_dist: 2.0
     lambda_short: 0.1
-    # sigma_hit: 0.08 (was stock 0.2) -- this is the likelihood field's
-    # own positional precision: at 0.2, any pose within ~0.2m of a true
-    # match looks statistically similar to amcl (the likelihood gradient
-    # is close to flat within ~1 sigma), which lines up almost exactly
-    # with unmapped_obstacle's observed ~0.2-0.3m map->odom noise floor
-    # (see alpha1-5/resample_interval/min_particles above -- those knobs
-    # plateaued at the same ~0.3m regardless, pointing at the sensor
-    # model's own precision rather than motion-model or particle-count
-    # noise as the actual limiter). Sim's lidar was bumped to the real
-    # RPLIDAR A2M8's ~3000-point resolution (see sim git history), so the
-    # scan data itself should support a sharper match than stock's 0.2m
-    # assumes. If retuning, re-derive rather than assuming 0.08 is final
-    # -- validate against continuous_drift (real injected noise) too, in
-    # case a sharper likelihood field makes amcl less tolerant of genuine
-    # sensor noise on real hardware.
+    # sigma_hit: 0.08 (was stock 0.2) -- likelihood field's positional
+    # precision, sharpened to match the sim lidar's higher resolution.
+    # See README.md Notes for derivation and retuning caveats.
     sigma_hit: 0.08
     z_hit: 0.5
     z_max: 0.05
     z_rand: 0.5
     z_short: 0.05
-    # do_beamskip: true (was false, stock default) -- enabled 2026-07-21,
-    # nav2_amcl's built-in mechanism for excluding beams that disagree
-    # with the map-predicted likelihood (e.g. an unmapped obstacle) from
-    # a scan's weight update, rather than letting them drag the whole
-    # particle weighting toward "unexpected obstacle" evidence. Tried
-    # FIRST as the fix for unmapped_obstacle's ~0.3-0.4m map->odom
-    # wobble, and measurably did NOT help (0.409m after enabling vs.
-    # 0.395-0.443m before) -- turned out the wobble wasn't obstacle-
-    # related at all (see alpha1-5 above for the actual diagnosis and
-    # fix). Left enabled anyway: it's still correct, low-risk defense
-    # for the real dynamic obstacles the competition will actually
-    # produce (other robots, thrown game pieces), just not what fixed
-    # this particular symptom.
+    # do_beamskip: true (was false, stock) -- excludes beams disagreeing
+    # with the map-predicted likelihood from weight updates. Didn't fix
+    # the wobble it was tried for, but kept as real-world obstacle
+    # robustness. See README.md Notes for tuning history.
     do_beamskip: true
     beam_skip_distance: 0.5
     beam_skip_error_threshold: 0.9
     beam_skip_threshold: 0.3
-    # min/max_particles: 1000/3000 (was 500/2000) -- more particles means
-    # a lower-variance mean-pose estimate per update, which should damp
-    # some of unmapped_obstacle's map->odom wobble (see alpha1-5 and
-    # resample_interval above for the rest of that diagnosis -- this is
-    # the same "amcl's own estimate noise, not real error" story, just a
-    # different knob). Kept well short of 5000+: max_beams=500 was
-    # already observed to fall behind real-time (see max_beams comment
-    # below), and particle count multiplies the same per-beam likelihood
-    # evaluation cost, so this is a moderate step, not a maximal one.
+    # min/max_particles: 1000/3000 (was 500/2000), a moderate step to damp
+    # map->odom wobble without exceeding max_beams' real-time budget --
+    # see README.md Notes for the full tuning history.
     min_particles: 1000
     max_particles: 3000
     pf_err: 0.05
     pf_z: 0.99
     recovery_alpha_fast: 0.0
     recovery_alpha_slow: 0.0
-    # resample_interval: 2 (was 1) -- with update_min_d/a this tight
-    # (0.1m/0.05rad) and the robot at 4.0 m/s, nearly every incoming scan
-    # triggers a filter update, so resample_interval:1 meant resampling on
-    # nearly every scan too. Resampling introduces its own draw-to-draw
-    # variance in the particle cloud's mean; at this update rate that
-    # variance itself is a plausible contributor to unmapped_obstacle's
-    # map->odom wobble during sharp cornering (see alpha1-5 above for the
-    # full diagnosis -- reported odometry is exact ground truth in that
-    # scenario, so any map->odom movement there is purely amcl's own
-    # estimate noise, not real error being corrected). Resampling every
-    # other update halves how often that variance gets injected without
-    # meaningfully slowing convergence at this scan rate.
+    # resample_interval: 2 (was 1) -- halves how often resampling injects
+    # its own particle-cloud variance, given update_min_d/a's tight
+    # 0.1m/0.05rad thresholds. See README.md Notes for tuning history.
     resample_interval: 2
     save_pose_rate: 0.5
     first_map_only: false
