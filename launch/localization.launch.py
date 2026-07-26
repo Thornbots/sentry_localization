@@ -1,9 +1,15 @@
 """
-Turns /odom + /scan into odom->root, and (for map-based backends)
-map->odom -- scheme picked by localization_mode (slam/mapping/amcl/ekf).
+Two orthogonal axes control localization:
+- localization_mode (slam/mapping/amcl/none) picks who owns map->odom --
+  slam_toolbox, amcl, or nobody (none). This is the map layer.
+- use_ekf (bool, default false) picks who owns odom->root: raw passthrough
+  of /odom (false), or EKF fusion of /odom + /scan_odom via ekf_node +
+  rf2o_laser_odometry_node (true). This is independent of localization_mode
+  -- use_ekf:=true can be layered on top of any localization_mode, including
+  none (the old map-free "ekf mode" configuration).
 Result always published on /localization/odom regardless of backend.
 load_map:=true (default) loads map_file's saved pose graph at startup.
-See README.md's localization_mode table/Notes section for per-mode detail.
+See README.md's localization_mode/use_ekf tables/Notes section for detail.
 """
 import os
 
@@ -44,8 +50,8 @@ def generate_launch_description():
                      "actually works for those modes against a map_file "
                      "that has a real .posegraph/.data, see map_file "
                      "below -- clean_map does not yet); amcl always loads "
-                     "map_file's .yaml regardless, and ekf runs no map "
-                     "node at all."
+                     "map_file's .yaml regardless, and localization_mode:=none "
+                     "runs no map node at all."
     )
     map_file_arg = DeclareLaunchArgument(
         "map_file", default_value=os.path.join(pkg_share, "map", "clean_map"),
@@ -66,15 +72,22 @@ def generate_launch_description():
 
     localization_mode_arg = DeclareLaunchArgument(
         "localization_mode", default_value="slam",
-        choices=["slam", "mapping", "amcl", "ekf"],
-        description="Selects the whole localization scheme in one choice "
-                     "-- see the module docstring for what each of "
-                     "slam/mapping/amcl/ekf actually launches and which "
-                     "TF edges (map->odom, odom->root) it owns."
+        choices=["slam", "mapping", "amcl", "none"],
+        description="Selects who owns map->odom -- see the module "
+                     "docstring for what each of slam/mapping/amcl/none "
+                     "actually launches. Independent of use_ekf, which "
+                     "owns odom->root."
+    )
+    use_ekf_arg = DeclareLaunchArgument(
+        "use_ekf", default_value="false",
+        description="Whether odom->root is EKF-fused (ekf_node + "
+                     "rf2o_laser_odometry_node) instead of passed through "
+                     "raw from /odom. Independent of localization_mode -- "
+                     "layers on top of slam/mapping/amcl/none."
     )
     localization_mode = LaunchConfiguration("localization_mode")
     ekf_selected = PythonExpression(
-        ["'", localization_mode, "' == 'ekf'"]
+        ["'", LaunchConfiguration("use_ekf"), "' == 'true'"]
     )
     amcl_selected = PythonExpression(
         ["'", localization_mode, "' == 'amcl'"]
@@ -83,7 +96,7 @@ def generate_launch_description():
         ["'", localization_mode, "' == 'mapping'"]
     )
     passthrough_selected = PythonExpression(
-        ["'", localization_mode, "' in ('slam', 'mapping', 'amcl')"]
+        ["'", LaunchConfiguration("use_ekf"), "' != 'true'"]
     )
     slam_toolbox_with_map_selected = PythonExpression(
         ["'", localization_mode, "' in ('slam', 'mapping') and '",
@@ -148,7 +161,7 @@ def generate_launch_description():
         ],
     )
 
-    # Only used by localization_mode:=ekf; nothing else reads /scan_odom.
+    # Only used when use_ekf:=true; nothing else reads /scan_odom.
     scan_odom_node = Node(
         package="rf2o_laser_odometry",
         executable="rf2o_laser_odometry_node",
@@ -219,7 +232,7 @@ def generate_launch_description():
     # static, so load_map:=false needs a version of this node that omits
     # the key entirely rather than passing it empty. Both are also gated
     # on localization_mode being slam/mapping -- not launched at all when
-    # localization_mode is amcl/ekf.
+    # localization_mode is amcl/none.
     slam_toolbox_with_map_node = Node(
         package="slam_toolbox",
         executable="async_slam_toolbox_node",
@@ -264,6 +277,7 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
+        use_ekf_arg,
         passthrough_odom_node, ekf_node,
         scan_odom_node,
         slam_toolbox_with_map_node, slam_toolbox_no_map_node,
