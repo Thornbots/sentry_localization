@@ -392,3 +392,89 @@ load and should hold regardless: getting under 0.20m there would need
 either a smaller `odom_slip_ratio` (not this test's call to make) or an
 absolute-position correction upstream of `amcl`'s own map->odom (i.e.
 what `--use-ekf` already tries to be) — not a further `amcl.yaml` knob.
+
+### 2026-07-26 (later same day) — `--backend amcl --use-ekf` full 5-scenario
+attempt: `process_noise_covariance` x/y closed as a lever; the loop
+geometry moved out from under the old 0.1642m/0.20m calibration
+
+Focused entirely on `--backend amcl --use-ekf`, tuning only `ekf.yaml`
+(no `amcl.yaml`/launch/threshold changes, per this session's scope). Net
+result: **no config change kept** — `ekf.yaml` is byte-identical to
+before this session (`git diff` empty). Final confirmed state:
+
+| scenario | result |
+|---|---|
+| `baseline` | PASS (0.0000m) |
+| `noise_correction` | FAIL (growth_ratio 2.23, threshold 2.0) |
+| `drift_correction` | FAIL (0.8038m, threshold 0.20m) |
+| `drift_correction_obstacle` | FAIL (0.5917m, threshold 0.20m) |
+| `jerk_with_motion` | PASS (8/8 trials) |
+
+**First finding: the 0.1642m EKF baseline this morning's session cited
+was measured against a loop geometry that no longer exists.** Per git
+history on `sim`: `8c35cc6` (measured `amcl+ekf` at 0.1642m,
+`MAX_DELTA_THRESHOLD=0.30m`) and `1e63c66` (tightened the threshold to
+0.20m, citing that same 0.1642m) both predate `4f182e7`
+("Recenter drift test's cornering loop on origin, widen to 3m"), which
+widened `OBSTACLE_LOOP_LEGS` from a 2m square (max corner distance from
+spawn ~1.80m) to the current 3m square (max corner distance ~2.12m — the
+figure the earlier session's `0.25*2.12≈0.53m` structural-bound math
+already uses for `--backend amcl`). So the 0.1642m PASS and the 0.20m
+threshold were both calibrated on the smaller, since-abandoned loop;
+today's 3m loop is a genuinely harder test that EKF's 0.1642m result was
+never actually measured against. This isn't captured by "host load noise"
+and isn't a `ekf.yaml` knob — it's a test-geometry/threshold staleness gap,
+out of scope for this session to fix (`run_localization_drift_tests.py`/
+thresholds were explicitly off-limits).
+
+**Second finding: rf2o (`/scan_odom`) is not the problem — it's the one
+input tracking ground truth.** Recorded a 50s `ros2 bag` of `/odom`,
+`/scan_odom`, `/localization/odom` mid-`drift_correction`-run to check
+whether rf2o's absolute x/y (fused directly into the EKF per
+`odom1_config`, see the design-rationale entry above) might be reversed
+or drifting independently, per a hypothesis that its position-only fusion
+could be inheriting scan-matching error wholesale. It isn't: over that
+window `/odom` moved +2.272m in x while true displacement under
+`odom_slip_ratio=0.25` is `2.272/0.75 ≈ 3.03m`; `/scan_odom` (and
+`/localization/odom`, which tracks it almost exactly since x/y comes
+from rf2o) moved +2.932m — within ~3% of the true 3.03m. rf2o is doing
+its job; the fusion design (velocity from `/odom`, position from
+`/scan_odom`) is correcting slip roughly as intended. The elevated
+`drift_correction`(`_obstacle`) numbers aren't caused by a bad rf2o
+input.
+
+**Third finding: `process_noise_covariance` x/y (indices [0][0]/[1][1])
+is now closed as a tuning lever**, having been tested in both directions
+across two sessions with no reliable signal against this scenario's own
+run-to-run noise floor:
+
+| x/y process noise | `drift_correction` runs (this session) |
+|---|---|
+| 0.05 (documented default) | 0.9972, 0.9135, 0.3999 m (3 runs) |
+| 0.02 (this session) | 0.9980, 0.6108 m (2 runs) |
+| 0.02 (prior session, heavy load) | 0.5986 m (1 run) |
+| 0.1 (prior session, heavy load) | 0.5953 m (1 run) |
+
+The 0.02 and 0.05 ranges overlap entirely (0.40–1.00m spread at the
+*same* config), and pre-run host load did not correlate with the result
+across these five same-session measurements (e.g. lowest load 0.58
+preceded the worst result, 0.9972m) — this run-to-run spread looks
+load-independent this time, not the contention story from the prior
+session. Most likely driver: the test reports a **max** over a 45s drive,
+so a single amcl correction update dominates the whole number; that's a
+scenario/threshold sensitivity issue, not something `process_noise_covariance`
+can smooth out. Reverted; `ekf.yaml` unchanged.
+
+**Net assessment**: `--backend amcl --use-ekf` does not currently pass
+`noise_correction`/`drift_correction`/`drift_correction_obstacle`
+reliably. Unlike the raw-`amcl` case, there's no clean structural
+argument that it *can't* — rf2o measurably supplies a real, ~97%-accurate
+absolute-position correction — but two closed tuning directions
+(`process_noise_covariance` x/y, both signs) and a stale
+threshold/geometry calibration leave no remaining `ekf.yaml`-only lever
+found this session. Next steps needing scope outside `ekf.yaml`
+(explicitly not done here): re-derive `MAX_DELTA_THRESHOLD`/re-measure a
+clean baseline against the current 3m loop before any further `ekf.yaml`
+tuning judges itself against a number that may not be achievable on this
+geometry; and/or reduce the test's max-over-window metric's sensitivity
+to a single transient correction.
