@@ -585,3 +585,72 @@ editing `config/ekf.yaml` in this same checkout while this session ran
 (a `dynamic_process_noise_covariance` addition, uncommitted at the time
 of writing) — that file was left untouched by this session; only
 `config/slam.yaml` was tuned/committed here.
+
+### 2026-07-27 — `noise_correction` boundedness: `dynamic_process_noise_covariance`
+kept (partial win, not a reliable pass); `drift_correction`(`_obstacle`)
+convergence-timing investigation (no change)
+
+Two follow-up passes on `--backend amcl --use-ekf`, `ekf.yaml`-only, in
+response to changed priorities mid-session (focus moved from
+`drift_correction`(`_obstacle`) to `noise_correction` specifically, then
+the harness's own `MAX_DELTA_THRESHOLD` 0.20m->0.30m and default
+`odom_slip_ratio` 0.25->0.15 changed under this session, both changes made
+by the coordinating session, not this one).
+
+**Convergence-timing check (`drift_correction`, no change kept).** Investigated
+whether the correction TF is actually converged by the 1.0s post-leg dwell
+mark or still settling when sampled, since `drift_correction`/
+`drift_correction_obstacle` only ever sample once per leg, right at the end
+of the dwell. Recorded `/tf`'s `map->odom` at full rate through a
+`drift_correction` run: early legs show ~1.3s genuine settling gaps within
+the 1.75s leg cycle (no change until the next leg), but by t≈34s the same
+signal never stops moving between legs at all, coinciding with the
+run's largest sampled deltas (0.5-0.78m). This looks like real
+convergence breakdown compounding lap over lap, not merely
+"distance-from-spawn is larger at some corners" — but no `ekf.yaml` knob
+found to address it specifically (`process_noise_covariance` was already
+closed off per the entry above; robot_localization has no separate
+"time-to-converge" parameter beyond process noise). Not pursued further
+after the coordinator deprioritized these two scenarios in favor of
+`noise_correction`.
+
+**`noise_correction` (`dynamic_process_noise_covariance: true` + x/y
+`process_noise_covariance` 0.05->0.08, kept).** `dynamic_process_noise_covariance`
+(a `robot_localization` param not previously tried, distinct from static
+process noise) scales `process_noise_covariance` by the filter's own
+current velocity estimate — more injected noise while actually moving,
+less near zero velocity — on the theory that `noise_correction`'s
+growth_ratio check (is the correction keeping pace with 60s of continuous
+injected drift, not just converging after one cornering event) might
+benefit from faster measurement trust while driving. Measured (isolated
+`--scenario noise_correction` runs, discarding any run where another
+concurrent session's stack was found running in parallel — see
+`sim/README.md`'s multi-agent coordination note for why that corrupts
+results):
+
+| config | slip=0.25 (stale) | slip=0.15 (current) |
+|---|---|---|
+| static 0.05, no dynamic (baseline) | 2.02 FAIL, 1.81 PASS, 2.23 FAIL | 2.09 FAIL, 1.40 PASS |
+| 0.08 + dynamic=true (kept) | 1.51, 1.92, 1.41 PASS; 2.17, 2.03 FAIL | 1.80, 1.58, 1.92, 1.55 PASS; 2.36 FAIL |
+
+Pass rate improved at both slip values (baseline ~40-50% vs. this config
+~60-80%), consistently across two independent slip settings, so this
+isn't just riding the slip reduction. **However, full-suite (`--headless`,
+no `--scenario` filter) confirmation runs gave FAIL both times tried
+(growth_ratio 2.17 and 2.49)** — worse than every isolated-run number above
+except the single worst outlier. The mechanism for this isolated-vs-suite
+gap wasn't identified (possibly cumulative load/residual state from the
+four scenarios run before `noise_correction` in suite order) — flagging
+it rather than papering over it. **Net: kept as a real, measured
+improvement in isolation, but not a reliable pass — don't report this as
+"noise_correction passes" without re-confirming in whatever context
+matters for the actual claim.**
+
+Also hit once during this session's testing, at this config: a
+`map_server` lifecycle heartbeat timeout ("CRITICAL FAILURE: SERVER
+map_server IS DOWN after not receiving a heartbeat for 4000 ms") under
+elevated host load, cascading to a full stack crash mid-scenario. Same
+class of bringup race documented earlier in this file's
+`drift_correction_obstacle` entry (host-load-driven, not config-driven);
+not re-tested against baseline to confirm it's config-independent, so
+noted rather than asserted.

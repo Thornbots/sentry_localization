@@ -28,6 +28,15 @@ ekf_filter_node:
 
     publish_tf: true
 
+    # Scales process_noise_covariance by the filter's own current velocity
+    # estimate -- more injected noise while moving fast, less near zero
+    # velocity. Paired with process_noise_covariance x/y raised 0.05->0.08.
+    # Improves noise_correction's growth_ratio boundedness in isolated
+    # --scenario runs (~80% pass rate vs ~50% at the static-0.05 baseline)
+    # but is NOT a reliable pass in full-suite context -- see README.md
+    # Notes for the measured numbers and the isolated-vs-suite discrepancy.
+    dynamic_process_noise_covariance: true
+
     odom0: /odom
     # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
     #
@@ -66,8 +75,8 @@ ekf_filter_node:
     # move at all regardless of what either odom source reports. x/y get
     # the library's normal defaults as a first pass -- not yet tuned
     # against real drift/slip data (e.g. the "Bumpy Road" arena zone).
-    process_noise_covariance: [0.05, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
-                               0.0,    0.05, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+    process_noise_covariance: [0.08, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+                               0.0,    0.08, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
                                0.0,    0.0,    0.06, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
                                0.0,    0.0,    0.0,    0.03, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
                                0.0,    0.0,    0.0,    0.0,    0.03, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
