@@ -586,6 +586,78 @@ editing `config/ekf.yaml` in this same checkout while this session ran
 of writing) — that file was left untouched by this session; only
 `config/slam.yaml` was tuned/committed here.
 
+### 2026-07-27 — `--backend amcl --use-ekf` re-examined under the new
+0.15 slip / 0.30m threshold / 30s `noise_correction` window: still no
+`amcl.yaml` lever found; `drift_correction`(`_obstacle`) trace is a real
+ramp, not motion-model noise
+
+Prompted by `run_localization_drift_tests.py`'s thresholds changing since
+the two 2026-07-26 sessions above (`odom_slip_ratio` 0.25→0.15,
+`MAX_DELTA_THRESHOLD` 0.20m→0.30m, `noise_correction` window 60s→30s) —
+the earlier "amcl.yaml is a closed lever" conclusion was reached under
+strictly harsher conditions, so it was worth re-checking rather than
+assuming it still holds. Scope: `config/amcl.yaml` only (no `ekf.yaml`,
+`slam.yaml`, test script, or threshold edits).
+
+**Clean confirmed baseline (unmodified `amcl.yaml`, idle-ish container,
+`sim_errors=0`/`sentry_errors=0` throughout)**:
+
+| scenario | result |
+|---|---|
+| `baseline` | PASS (0.0000m) |
+| `noise_correction` | PASS (growth_ratio 1.50, threshold 2.0) |
+| `drift_correction` | FAIL (0.8504m, threshold 0.30m) |
+| `drift_correction_obstacle` | FAIL (0.6161m, threshold 0.30m) |
+| `jerk_with_motion` | PASS (8/8 trials) |
+
+Same 3/5 pattern as both 2026-07-26 sessions — the two map-based-drift
+scenarios still fail, just against a looser 0.30m bar now. Two isolated
+clean single-scenario runs taken while tuning (0.6480m/0.7642m) plus this
+run's 0.8504m/0.6161m span roughly the same 0.6–1.3m noise band the prior
+sessions documented — this scenario pair's run-to-run spread is still
+comparable to or larger than the gap to threshold, same caveat as before.
+
+**Per-sample trace shows a ramp, not a spike.** Read the raw `t=Ns
+|map->odom - pre-loop|=...` lines from the two clean isolated runs (not
+just the summary max): both climb roughly monotonically from ~0.04–0.08m
+at t=2s to their final 0.65–0.76m at t=45s, tracking the loop's
+progressively-more-offset corners rather than jumping once and settling.
+This means amcl is faithfully correcting a real, growing map->odom
+discrepancy over the course of the loop — not injecting its own transient
+particle-filter noise on top of a small true error, which is the failure
+mode `alpha1-5`/particle-count/`resample_interval` were tuned against
+previously. A knob that damps amcl's own estimate noise has nothing to
+act on here.
+
+**Only new thing tried: `sigma_hit` loosened 0.08→0.15** (the one
+untested-against-this-scenario knob flagged in this file's own tuning
+notes — "re-derive rather than assuming 0.08 is final"). Single clean run,
+`drift_correction` alone: **1.1203m — worse**, and nowhere near the 0.30m
+target; within the same noise band as the closed alpha1-5/particle-count
+directions from 2026-07-26, not a real improvement or a real regression
+either. Reverted; `amcl.yaml` is byte-identical to before this session
+(`git diff` empty).
+
+**Net assessment**: the 2026-07-26 "amcl.yaml tuning is a closed lever for
+`drift_correction`(`_obstacle`)" conclusion holds under the new, more
+permissive conditions too — the threshold moved but the mechanism
+producing the failure didn't. The EKF-fused odometry `amcl` consumes here
+is far more accurate than raw slipped `/odom` (rf2o corrects most of the
+slip per the 2026-07-26 EKF session's bag-level finding), yet
+`drift_correction`(`_obstacle`) still measures 2–2.5x over threshold with
+a monotonic-ramp signature — pointing at a residual EKF-vs-ground-truth
+gap that grows over the loop (a fusion-design/tuning question, out of
+this session's `amcl.yaml`-only scope) rather than anything in `amcl`'s
+own motion/sensor model. No config change kept this session.
+
+Collision note: one `drift_correction` launch this session briefly
+overlapped with the other concurrently-running session's `noise_correction`
+stack (both live for a few seconds before being caught and killed) —
+caught immediately via `sim_errors`/`sentry_errors` and process-list
+checks, my own run was killed right away and its result discarded, and
+the other session's window was flagged to them as a result to
+double-check rather than silently trust.
+
 ### 2026-07-27 — `noise_correction` boundedness: `dynamic_process_noise_covariance`
 kept (partial win, not a reliable pass); `drift_correction`(`_obstacle`)
 convergence-timing investigation (no change)
