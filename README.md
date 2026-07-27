@@ -305,3 +305,90 @@ or no real motion since the last scan. `minimum_travel_heading` is
 irrelevant either way — this chassis is holonomic and never rotates its
 heading — left small (0.05) rather than 0 to avoid relying on exact-zero
 comparisons.
+
+### 2026-07-26 — `drift_correction`/`drift_correction_obstacle` under
+`odom_slip_ratio=0.25`: structural bound for `--backend amcl`, and a
+host-load confound that blocked confirming `--backend amcl --use-ekf`
+
+Attempted to tune `amcl.yaml`/`ekf.yaml` to pass both
+`drift_correction`/`drift_correction_obstacle` (`MAX_DELTA_THRESHOLD=0.20m`)
+under the new `odom_slip_ratio=0.25` default, for both `--backend amcl`
+and `--backend amcl --use-ekf`. Net result: no YAML change (both files
+are unchanged from before this session) — every tuning direction tried
+either made things worse or made no measurable difference, and a
+structural argument (below) says raw `amcl` likely cannot pass this pair
+at all under 25% slip, regardless of `amcl.yaml` tuning.
+
+**The structural bound (`--backend amcl`, no EKF).** `sim/sim/
+pose_emulator.py`'s slip model integrates only `(1 - slip_ratio)` of each
+true incremental displacement into reported `/odom`, which solves to
+`odom_error(t) = slip_ratio * |true_pos(t) - true_pos(t0)|` — a
+displacement-from-start error, not a path-length one. `t0` is effectively
+the loop's own spawn point (`(0,0)`, same as `OBSTACLE_XY`), and
+`OBSTACLE_LOOP_LEGS`'s corners sit up to `sqrt(1.5^2+1.5^2)=2.12m` from
+there, so the raw odom-frame divergence that `amcl`'s own map->odom
+correction must track to stay accurate reaches `0.25*2.12 ≈ 0.53m` at the
+far corners — over 2.5x `MAX_DELTA_THRESHOLD`. Since raw `amcl` (no EKF)
+has no other absolute-position input than its own lidar scan match, its
+map->odom TF necessarily has to move by close to that much to remain
+correct; the test measures exactly that movement. Confirmed empirically:
+every `drift_correction`(`_obstacle`) measurement taken this session
+across every `amcl.yaml` variant tried, on `--backend amcl`, landed at
+0.42–0.99m — never once near 0.20m, and instructively, the variants that
+made `amcl` track the true error *more* faithfully (raising `alpha3`/
+`alpha5` to 0.2) produced deltas *closer to* the 0.53m theoretical max
+(0.51m), while the variants that made it lag/undercorrect (`alpha`
+lowered to 0.07, or more particles) gave smaller-but-still-failing deltas
+(0.45–0.47m). Tracking fidelity and a bounded map->odom are in direct
+conflict here — this isn't a knob `amcl.yaml` has.
+
+Tried (all single runs — see host-load caveat below before trusting exact
+numbers, though the qualitative pattern held up over 8 varied runs):
+alpha1-5 raised to 0.2 (`alpha3`/`alpha5` only) → 0.5121m; alpha1-5
+lowered to 0.07 (all five) → 0.4692m; `min_particles`/`max_particles`
+raised to 2000/5000 (alphas at documented 0.0875) → 0.4502m. None beat
+the documented-baseline 0.0875/1000/3000 (0.4259–0.4447m across repeats).
+All reverted; `amcl.yaml` is unchanged from before this session.
+
+**`--backend amcl --use-ekf`: could not get a trustworthy read this
+session.** The session's stated prior baseline was `drift_correction`
+0.1991m (PASS) and `drift_correction_obstacle` 0.2660m (FAIL, just over).
+Tried lowering `ekf.yaml`'s x/y `process_noise_covariance` (0.05→0.02,
+smoother/more-trusted prediction) and raising it (0.05→0.1, faster
+response) — both made `drift_correction_obstacle` much worse (0.5986m
+and 0.5953m respectively), not better in either direction. Reverted to
+confirm the baseline itself: three consecutive **unmodified**-config runs
+of `drift_correction_obstacle` gave a lifecycle-manager bringup race
+(`amcl/get_state` `async_send_request failed`, not a config issue —
+confirmed via `sentry_pkg.log`, teardown-time SIGINT only, `rf2o`/`ekf`
+alive and streaming the whole window), then 0.5188m, then 0.6798m — none
+close to the documented 0.2660m, all with `ekf_filter_node`/`rf2o`
+confirmed healthy throughout (continuous `Laser odom` lines to the very
+end of each run, no crash before teardown). A final full-suite confirmation
+run made it worse still: `noise_correction` (previously a trivial PASS)
+FAILed (growth_ratio 2.14, then a full TF timeout on the run before that),
+`drift_correction` hit 0.9908m.
+
+Root cause: this host was running **~18 concurrent Claude Code sessions**
+during this work (`ps aux --sort=-%cpu`, `uptime` load average 4–8 out of
+22 CPUs, rising mid-run every time it was checked) — exactly the
+"heavy unrelated CPU load ... can slow scan-matching enough to make
+timing-sensitive scenarios look like false failures" case the test
+script's own `check_no_orphans` warning describes, just far more
+severe/persistent than that warning anticipates. This makes every
+number collected this session for `--use-ekf` unreliable as a signal for
+telling a real config effect from load-induced degradation — a change
+that looks like it helped or hurt could just as easily be the difference
+between running alongside 4 other agents vs. 12. No YAML change from this
+session was kept for `ekf.yaml` either; it is unchanged from before.
+
+**For the next person tuning this**: re-run the suite when this host is
+otherwise idle (`uptime`/`ps aux --sort=-%cpu` first) before trusting any
+`--use-ekf` number close to the 0.20m threshold, and before concluding a
+knob helped or hurt on `drift_correction`(`_obstacle`) specifically — the
+signal is currently smaller than the noise this host can inject. The
+`--backend amcl` (no EKF) structural bound above doesn't depend on host
+load and should hold regardless: getting under 0.20m there would need
+either a smaller `odom_slip_ratio` (not this test's call to make) or an
+absolute-position correction upstream of `amcl`'s own map->odom (i.e.
+what `--use-ekf` already tries to be) — not a further `amcl.yaml` knob.
