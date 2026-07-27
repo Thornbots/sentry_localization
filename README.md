@@ -478,3 +478,110 @@ clean baseline against the current 3m loop before any further `ekf.yaml`
 tuning judges itself against a number that may not be achievable on this
 geometry; and/or reduce the test's max-over-window metric's sensitivity
 to a single transient correction.
+
+### 2026-07-27 — `--backend slam` tuned to a meaningfully better (but still
+failing) `drift_correction`/`drift_correction_obstacle`; `--backend slam
+--use-ekf` measured worse across the board
+
+Followed up on the two amcl/amcl+ekf sessions above by trying
+`slam_toolbox` itself (`--backend slam`, `localization_mode:=slam` against
+`map/ARCC26`) as the map->odom correction source, tuning only
+`config/slam.yaml`, under the same `odom_slip_ratio=0.25`/3m-loop
+conditions.
+
+**Untuned `--backend slam` baseline** (before this session's edits):
+`baseline`/`noise_correction`/`jerk_with_motion` PASS,
+`drift_correction` 0.8558m FAIL, `drift_correction_obstacle` 0.5485m FAIL
+(threshold 0.20m both).
+
+**What worked: widening `correlation_search_space_dimension` (0.5 -> 2.5)
+and raising `minimum_time_interval` (0.5 -> 1.0)**. Rationale: at
+`odom_slip_ratio=0.25` the raw odometry the matcher searches around can
+be off from true pose by up to ~0.53m at the loop's far corners (same
+structural-bound math as the amcl session above) — a 0.5m-wide (+-0.25m)
+correlation search window can't even see the true alignment to consider
+it as a candidate. Widening to 2.5 (+-1.25m) fixed that. Iterating on
+`drift_correction` alone: dimension alone (1.5) got 0.55-0.58m (two runs);
+dimension 2.5 got 0.50-0.59m (three runs, no further gain past 1.5, so
+2.5 mostly just adds margin, not signal); lowering `minimum_time_interval`
+to 0.1 (more frequent, smaller-baseline matches) made it measurably
+*worse* (0.89m) — reverted; raising it to 1.0 instead (fewer,
+higher-baseline matches during the fast cornering legs) gave the best
+single measurement, 0.50m. Also tried loosening
+`distance_variance_penalty`/`minimum_distance_penalty` (0.5->1.0/0.8,
+meant to stop the match score from penalizing the correct-but-far-from-
+odom alignment) — no improvement over the search-space+interval change
+alone (0.59m vs 0.50m, within this scenario's own run-to-run spread) —
+reverted, kept only the two changes above.
+
+**Confirmed full-suite result, `--backend slam` (tuned, clean/idle
+container run)**:
+
+| scenario | result |
+|---|---|
+| `baseline` | PASS (0.0075m) |
+| `noise_correction` | PASS (growth_ratio 0.74) |
+| `drift_correction` | FAIL (0.5066m, threshold 0.20m) |
+| `drift_correction_obstacle` | FAIL (0.4876m, threshold 0.20m) |
+| `jerk_with_motion` | PASS (8/8 trials) |
+
+A meaningful, repeatable improvement over the untuned baseline
+(0.86m/0.55m -> ~0.49-0.51m, roughly halved on `drift_correction`), and
+comparable to or slightly better than the best numbers either `amcl`
+session above ever got (raw `amcl` 0.42-0.99m; `amcl+ekf` best single run
+0.40m, typically 0.6-1.0m) — but still ~2.5x over `MAX_DELTA_THRESHOLD`.
+This looks like the same structural floor as the amcl case: the test
+samples the correction only once, at the end of each leg's 1.0s
+stationary dwell, and `slam_toolbox`'s distance/heading travel-gating
+means no new scan gets matched at all once the robot is truly
+stationary — so the sampled value is frozen at whatever the single scan
+match right before arrival produced, and that match still has to pull in
+a true-pose offset that can reach ~0.53m. Widening the search space and
+raising the match interval improved how reliably that one match finds
+the *right* alignment, but doesn't change the fact that a single
+scan-match correction is being asked to close most of a 0.5m gap in one
+shot.
+
+**`--backend slam --use-ekf` (EKF-fused odometry underneath slam_toolbox
+localization) measured markedly worse, not better**, in the same
+clean-container full-suite run:
+
+| scenario | result |
+|---|---|
+| `baseline` | PASS (0.0000m) |
+| `noise_correction` | FAIL (growth_ratio 2.42, threshold 2.0) |
+| `drift_correction` | FAIL (1.0659m, threshold 0.20m) |
+| `drift_correction_obstacle` | FAIL (0.8652m, threshold 0.20m) |
+| `jerk_with_motion` | PASS (8/8 trials) |
+
+Every failing number roughly doubled versus plain `--backend slam`
+(1.07m/0.87m vs 0.51m/0.49m), and `noise_correction` newly failed too.
+Root-caused (by inspection, not fixed, per this session's scope) to
+architecture rather than a knob: `slam_toolbox`'s `odom_frame` TF, which
+its own scan-match correction is computed relative to, *is* the EKF's
+fused output here (not raw `/odom`) — so the EKF's own rf2o-derived
+absolute-position correction and `slam_toolbox`'s own scan-match
+absolute-position correction are two independent corrections stacked on
+top of each other against the same underlying lidar data, rather than
+one deferring to the other. That's a plausible mechanism for the
+"correction" overshooting/compounding instead of averaging out, though
+not confirmed by a bag-level investigation this session (out of scope —
+see the top-level task's instruction to prioritize `slam.yaml` and not
+re-litigate `ekf.yaml` beyond a quick look). This combination was already
+flagged in `sim/README.md` as untested before this session; it is now
+tested, and measurably not an improvement over `--backend slam` alone.
+
+**Net assessment**: `--backend slam` (no EKF), tuned as above, is the
+best `drift_correction`/`drift_correction_obstacle` result found across
+all backends tried this session and the two prior amcl sessions, but
+still fails both under the current `odom_slip_ratio=0.25`/3m-loop/0.20m
+threshold combination — same likely floor as `amcl`: a single-shot,
+post-dwell scan-match correction is being measured against a slip-driven
+raw-odom error that can be significantly larger than the threshold at
+the loop's far corners. `--backend slam --use-ekf` should not be used
+in its current form; it performs worse than `--backend slam` alone.
+**config/ekf.yaml change note**: another concurrent session was actively
+editing `config/ekf.yaml` in this same checkout while this session ran
+(a `dynamic_process_noise_covariance` addition, uncommitted at the time
+of writing) — that file was left untouched by this session; only
+`config/slam.yaml` was tuned/committed here.
