@@ -599,6 +599,17 @@ strictly harsher conditions, so it was worth re-checking rather than
 assuming it still holds. Scope: `config/amcl.yaml` only (no `ekf.yaml`,
 `slam.yaml`, test script, or threshold edits).
 
+**`ekf.yaml` provenance for every number below**: a concurrent session was
+tuning `ekf.yaml` throughout this session and had already landed
+`dynamic_process_noise_covariance: true` + x/y process noise 0.05→0.08
+(uncommitted at this session's start, committed as `8a719ab` partway
+through, `git show 8a719ab:config/ekf.yaml` confirms it matches) — this
+was live for every run in this entry, start to finish, so the numbers
+below are internally comparable to each other but **not** to the
+2026-07-26 entries above, which were measured against the prior static
+0.05 `ekf.yaml`. Three things changed since 2026-07-26, not one: the
+thresholds, `odom_slip_ratio`, and `ekf.yaml` itself.
+
 **Clean confirmed baseline (unmodified `amcl.yaml`, idle-ish container,
 `sim_errors=0`/`sentry_errors=0` throughout)**:
 
@@ -628,6 +639,15 @@ particle-filter noise on top of a small true error, which is the failure
 mode `alpha1-5`/particle-count/`resample_interval` were tuned against
 previously. A knob that damps amcl's own estimate noise has nothing to
 act on here.
+
+Notably, in both traces the max is the *final* sample (t=45.0s/45.1s,
+right at loop-close back near the origin) — the error never plateaus or
+falls back as the robot returns toward its start corner, which a
+displacement-from-start slip term should do on a closed loop. That
+points at path-length-accumulated drift in the fused estimate (e.g. rf2o
+integration error) rather than a slip-vs-start-point effect, reinforcing
+that this is a fusion/estimation question upstream of `amcl`, not
+something `amcl.yaml` can address.
 
 **Only new thing tried: `sigma_hit` loosened 0.08→0.15** (the one
 untested-against-this-scenario knob flagged in this file's own tuning
