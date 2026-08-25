@@ -1,4 +1,4 @@
-# sentry_localization — agent notes
+# sentry_localization: agent notes
 
 Localization backends (SLAM / AMCL / EKF) for the Sentry. Consumes `/odom` +
 `/scan`, produces `/localization/odom` and the `map->odom` owner. **Reference
