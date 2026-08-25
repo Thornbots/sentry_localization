@@ -2,7 +2,7 @@
 
 Localization backends (SLAM / AMCL / EKF) for the Sentry. Consumes `/odom` +
 `/scan`, produces `/localization/odom` and the `map->odom` owner. **Reference
-docs live in `README.md`** — its `## Notes` section holds the per-parameter
+docs live in `README.md`**; its `## Notes` section holds the per-parameter
 tuning rationale and the dated measurement history that justifies the current
 values. Read that before changing any YAML. This file is only the operating
 contract for working here.
@@ -25,7 +25,7 @@ before your first container command.
 ```
 
 Launch through `sentry_pkg`'s `auto.launch.py`, which includes this package's
-`localization.launch.py` — don't launch it standalone.
+`localization.launch.py`. Don't launch it standalone.
 
 **Two ways an edit here silently does nothing:**
 
@@ -45,8 +45,8 @@ On 2026-07-25 this exact trap invalidated a full round of EKF measurements.
 
 ## Testing
 
-The drift/jerk suite lives in `../sim/test/localization/run_localization_drift_tests.py`
-— see `../sim/AGENTS.md`. Run it after tuning `slam.yaml`, `amcl.yaml`,
+The drift/jerk suite lives in `../sim/test/localization/run_localization_drift_tests.py`;
+see `../sim/AGENTS.md`. Run it after tuning `slam.yaml`, `amcl.yaml`,
 `ekf.yaml`, or `sim`'s noise model, and rebuild both packages first.
 
 ## Scope
@@ -54,7 +54,7 @@ The drift/jerk suite lives in `../sim/test/localization/run_localization_drift_t
 - Owns the backends and their tuning; `localization_mode` (`slam` default /
   `mapping` / `amcl` / `none`) picks the `map->odom` owner, `use_ekf`
   independently picks the `odom->root` source.
-- No direct hardware dependency — drivers, URDF, and the MCB relay belong to
+- No direct hardware dependency; drivers, URDF, and the MCB relay belong to
   `../sentry_pkg`.
 - Current state: localization is considered good enough; CV is the priority.
   Don't retune without being asked. See `../SESSION_NOTES.md`.
