@@ -28,7 +28,7 @@ relevant args. Direct use (e.g. for testing) looks like:
 ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 ```
 
-### `localization_mode` — pick the map->odom owner (independent of `use_ekf`)
+### `localization_mode`: pick the map->odom owner (independent of `use_ekf`)
 
 | value | map->odom owner | use case |
 |---|---|---|
@@ -37,7 +37,7 @@ ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 | `amcl` | `nav2_amcl` + `nav2_map_server` | particle-filter localization against a saved occupancy grid |
 | `none` | *(none, no map frame)* | no map layer at all (e.g. odometry-fusion-only running, paired with `use_ekf:=true`) |
 
-### `use_ekf` — pick the odom->root source (independent of `localization_mode`)
+### `use_ekf`: pick the odom->root source (independent of `localization_mode`)
 
 | value | /localization/odom source | use case |
 |---|---|---|
@@ -102,7 +102,7 @@ Tuning history, rationale, and postmortems trimmed out of in-code comments
 to keep those short. Kept here so a future tuner knows this history exists
 before changing a value back to something already tried and rejected.
 
-### `launch/localization.launch.py` — per-mode map/load_map/lifecycle detail
+### `launch/localization.launch.py`: per-mode map/load_map/lifecycle detail
 
 Beyond the `localization_mode`/`use_ekf` tables and rf2o summary above:
 
@@ -126,7 +126,7 @@ Beyond the `localization_mode`/`use_ekf` tables and rf2o summary above:
   forwarding scans while the head was near home, via a filtered
   `/scan_gated` topic) is no longer needed and has been removed.
 
-### `config/amcl.yaml` — alpha1-5 motion-noise tuning history
+### `config/amcl.yaml`: alpha1-5 motion-noise tuning history
 
 Stock value is 0.2 for alpha1-5. Robot is holonomic (translates in x/y
 without rotating to move), so `robot_model_type` is set to
@@ -160,7 +160,7 @@ check for the pf_kdtree crash at each step, not straight to an aggressive
 value, AND validate against `continuous_drift` alongside
 `unmapped_obstacle` so a fix for one doesn't regress the other.
 
-### `config/amcl.yaml` — sigma_hit precision rationale
+### `config/amcl.yaml`: sigma_hit precision rationale
 
 `sigma_hit: 0.08` (was stock 0.2) is the likelihood field's own
 positional precision: at 0.2, any pose within ~0.2m of a true match looks
@@ -178,7 +178,7 @@ against `continuous_drift` (real injected noise) too, in case a sharper
 likelihood field makes amcl less tolerant of genuine sensor noise on real
 hardware.
 
-### `config/amcl.yaml` — do_beamskip rationale
+### `config/amcl.yaml`: do_beamskip rationale
 
 `do_beamskip: true` (was `false`, stock default), enabled 2026-07-21, is
 nav2_amcl's built-in mechanism for excluding beams that disagree with the
@@ -194,7 +194,7 @@ above). Left enabled anyway: it's still correct, low-risk defense for the
 real dynamic obstacles the competition will actually produce (other
 robots, thrown game pieces), just not what fixed this particular symptom.
 
-### `config/amcl.yaml` — resample_interval rationale
+### `config/amcl.yaml`: resample_interval rationale
 
 `resample_interval: 2` (was 1): with `update_min_d`/`update_min_a` this
 tight (0.1m/0.05rad) and the robot at 4.0 m/s, nearly every incoming scan
@@ -208,7 +208,7 @@ real error being corrected; see alpha1-5 notes above for the full
 diagnosis). Resampling every other update halves how often that variance
 gets injected without meaningfully slowing convergence at this scan rate.
 
-### `config/amcl.yaml` — min_particles/max_particles rationale
+### `config/amcl.yaml`: min_particles/max_particles rationale
 
 `min_particles`/`max_particles: 1000/3000` (was 500/2000) is part of the
 same wobble-diagnosis story as alpha1-5 and resample_interval above: more
@@ -219,7 +219,7 @@ Kept well short of 5000+: `max_beams=500` was already observed to fall
 behind real-time, and particle count multiplies the same per-beam
 likelihood evaluation cost, so this is a moderate step, not a maximal one.
 
-### `config/ekf.yaml` — odometry sources and fusion strategy
+### `config/ekf.yaml`: odometry sources and fusion strategy
 
 First-pass EKF config, not final tuning. Covariance/process-noise numbers
 are reasonable starting guesses, not measured/validated.
@@ -244,7 +244,7 @@ fixed, per user direction. The low yaw process noise still keeps yaw
 tightly trusted overall, this just lets rf2o's yaw estimate contribute
 continuously rather than being ignored.
 
-### `config/ekf.yaml` — odom0_config velocity-only fusion rationale
+### `config/ekf.yaml`: odom0_config velocity-only fusion rationale
 
 `odom0_config` fuses velocity only from `/odom`; x/y are deliberately NOT
 fused from this source.
@@ -279,7 +279,7 @@ NOT fused from rf2o, for the same reason: its yaw was measured off by
 ~pi, and the chassis heading is pinned by `odom0` anyway, so there is
 nothing for rf2o's yaw to contribute except error.
 
-### `config/slam.yaml` — minimum_travel_distance rationale
+### `config/slam.yaml`: minimum_travel_distance rationale
 
 Was 0.5m/0.5rad. 0.5m is far too coarse for this robot: sudden external
 position jerks (wheel slip on the arena's "Bumpy Road" zone,
@@ -305,7 +305,7 @@ irrelevant either way, since this chassis is holonomic and never rotates its
 heading. It's left small (0.05) rather than 0 to avoid relying on exact-zero
 comparisons.
 
-### 2026-07-26 — `drift_correction`/`drift_correction_obstacle` under
+### 2026-07-26: `drift_correction`/`drift_correction_obstacle` under
 `odom_slip_ratio=0.25`: structural bound for `--backend amcl`, and a
 host-load confound that blocked confirming `--backend amcl --use-ekf`
 
@@ -392,7 +392,7 @@ either a smaller `odom_slip_ratio` (not this test's call to make) or an
 absolute-position correction upstream of `amcl`'s own map->odom (i.e.
 what `--use-ekf` already tries to be), not a further `amcl.yaml` knob.
 
-### 2026-07-26 (later same day) — `--backend amcl --use-ekf` full 5-scenario
+### 2026-07-26 (later same day): `--backend amcl --use-ekf` full 5-scenario
 attempt: `process_noise_covariance` x/y closed as a lever; the loop
 geometry moved out from under the old 0.1642m/0.20m calibration
 
@@ -478,7 +478,7 @@ tuning judges itself against a number that may not be achievable on this
 geometry; and/or reduce the test's max-over-window metric's sensitivity
 to a single transient correction.
 
-### 2026-07-27 — `--backend slam` tuned to a meaningfully better (but still
+### 2026-07-27: `--backend slam` tuned to a meaningfully better (but still
 failing) `drift_correction`/`drift_correction_obstacle`; `--backend slam
 --use-ekf` measured worse across the board
 
@@ -585,7 +585,7 @@ editing `config/ekf.yaml` in this same checkout while this session ran
 of writing); that file was left untouched by this session, and only
 `config/slam.yaml` was tuned/committed here.
 
-### 2026-07-27 — `--backend amcl --use-ekf` re-examined under the new
+### 2026-07-27: `--backend amcl --use-ekf` re-examined under the new
 0.15 slip / 0.30m threshold / 30s `noise_correction` window: still no
 `amcl.yaml` lever found; `drift_correction`(`_obstacle`) trace is a real
 ramp, not motion-model noise
@@ -677,7 +677,7 @@ checks, my own run was killed right away and its result discarded, and
 the other session's window was flagged to them as a result to
 double-check rather than silently trust.
 
-### 2026-07-27 — `noise_correction` boundedness: `dynamic_process_noise_covariance`
+### 2026-07-27, `noise_correction` boundedness: `dynamic_process_noise_covariance`
 kept (partial win, not a reliable pass); `drift_correction`(`_obstacle`)
 convergence-timing investigation (no change)
 
@@ -746,7 +746,7 @@ class of bringup race documented earlier in this file's
 not re-tested against baseline to confirm it's config-independent, so
 noted rather than asserted.
 
-### 2026-07-27 (closing) — final decision: tuned `--backend slam` (no EKF)
+### 2026-07-27 (closing), final decision: tuned `--backend slam` (no EKF)
 is the calibrated target; `MAX_DELTA_THRESHOLD` raised 0.30m→0.40m
 
 Closes out the day's tuning investigation above. Picked the single
