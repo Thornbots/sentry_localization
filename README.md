@@ -75,13 +75,12 @@ backend plus EKF-fused odometry underneath it).
 - `passthrough_odom_publisher.py` relays `/odom` onto
   `/localization/odom` unchanged. Used whenever `use_ekf:=false`, any
   `localization_mode`.
-- `simple_relocalize_publisher.py` is the relocalization helper (see the file's
-  docstring for specifics). The backend-agnostic drift-correction relay
-  that used to live here as `slam_relocalize_publisher.py` (SLAM-specific,
-  compared a `map->root` TF against the MCB's raw pose) has moved to
-  `sentry_pkg/mcb_relay.py`, which compares `/localization/odom` (this
-  package's one guaranteed output, any backend) against `/odom` directly
-  instead of a TF lookup; see `sentry_pkg/README.md`.
+The backend-agnostic drift-correction relay that used to live here as
+`slam_relocalize_publisher.py` (SLAM-specific, compared a `map->root` TF
+against the MCB's raw pose) has moved to `sentry_pkg/mcb_relay.py`, which
+compares `/localization/odom` (this package's one guaranteed output, any
+backend) against `/odom` directly instead of a TF lookup; see
+`sentry_pkg/README.md`.
 
 ## Testing
 
@@ -757,9 +756,12 @@ record for it (0.49-0.50m) was stale, measured at the old 0.25 slip.
 
 **Chosen config: `--backend slam`, no EKF, tuned `config/slam.yaml`**
 (`correlation_search_space_dimension:2.5`, `minimum_time_interval:1.0`,
-both already committed `f23c6be`). This is also `auto.launch.py`'s
-existing default (`localization_mode:=slam`, `use_ekf:=false`), so no
-launch-default change needed.
+both already committed `f23c6be`). **Note (2026-08-29): `auto.launch.py`'s
+default is now `localization_mode:=amcl`, not `slam`**, a deliberate
+choice made after this measurement, which recommends `slam`. The numbers
+below still stand; the default simply no longer follows them. Pass
+`localization_mode:=slam` explicitly for the configuration this section
+describes.
 
 **Why this config over the alternatives**: raw `--backend amcl` (no EKF)
 has a documented structural floor (~0.42-0.99m, tracks
@@ -826,6 +828,7 @@ scenarios pass reliably (occasional bringup-race flakes are a known,
 load-driven, pre-existing issue unrelated to this config, not a
 threshold or tuning gap). No `amcl.yaml`/`ekf.yaml` changes were made or
 re-opened per this task's scope; both remain closed levers per the
-sessions above. `auto.launch.py`'s defaults (`localization_mode:=slam`,
-`use_ekf:=false`) were left unchanged; they already matched the chosen
-config.
+sessions above. `auto.launch.py`'s defaults were left unchanged by that
+task; `localization_mode` has since been set to `amcl` (2026-08-29), so
+the default no longer matches this section's chosen config. `use_ekf`
+remains `false`.
