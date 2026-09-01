@@ -173,9 +173,9 @@ that disagree with the map-predicted likelihood from a scan's weight
 update, rather than letting them drag the whole particle weighting toward
 "unexpected obstacle" evidence.
 
-Tried first as the fix for the `unmapped_obstacle` wobble and measurably
-did not help (0.409m after, vs 0.395-0.443m before) -- the wobble wasn't
-obstacle-related at all. Kept anyway as correct, low-risk defense against
+Tried first as the fix for the `unmapped_obstacle` wobble and measurably did
+not help (0.409m after, vs 0.395-0.443m before), because the wobble wasn't
+obstacle-related at all. Kept anyway as a correct, low-risk defense against
 the real dynamic obstacles a competition produces.
 
 ### `config/amcl.yaml`: resample_interval and particle counts
@@ -199,8 +199,8 @@ is amcl's own noise rather than real error being corrected.
 
 ### `config/ekf.yaml`: sources and fusion strategy
 
-First-pass config. Covariance and process-noise numbers are reasonable
-starting guesses, not measured.
+Nobody has measured the covariance or process-noise numbers here. They are
+reasonable starting guesses for a first pass.
 
 - `odom0` (`/odom`, wheel odometry): x, y, vx, vy. The chassis is
   holonomic and never rotates during a match (see
@@ -211,20 +211,20 @@ starting guesses, not measured.
   home, because rf2o cached the lidar->base transform at startup; fixed
   upstream, so this is a steady stream now.
 
-**x/y are deliberately not fused from `/odom`.** Wheel odometry's dominant
-error here is slip (the arena's "Bumpy Road" zone, modelled by sim's
-`odom_slip_ratio`), an error in integrated distance that accumulates
-monotonically, so no covariance tuning lets `/scan_odom` pull it back: the
-filter converges onto the slipped position and the point of fusing a scan
-matcher is lost. Measured 2026-07-25 -- driving ~42m straight at
+The config deliberately leaves x/y out of the `/odom` fusion. Wheel
+odometry's dominant error here is slip (the arena's "Bumpy Road" zone,
+modelled by sim's `odom_slip_ratio`), an error in integrated distance that
+accumulates monotonically, so no covariance tuning lets `/scan_odom` pull it
+back: the filter converges onto the slipped position and the point of fusing
+a scan matcher is lost. Measured 2026-07-25, driving ~42m straight at
 `odom_slip_ratio=0.05`, ekf output tracked `/odom` to within 0.001m while
-both sat 2.02m (5% of 42m) behind ground truth. Fusing velocity instead
-lets encoders do what they're good at (smooth, high-rate short-term
-motion) while `/scan_odom` owns absolute position.
+both sat 2.02m (5% of 42m) behind ground truth. Fusing velocity instead lets
+encoders do what they're good at (smooth, high-rate short-term motion) while
+`/scan_odom` owns absolute position.
 
-**Yaw is fused from `/odom` despite that identity orientation**, because
-identity is not "no information" here, it's the physically guaranteed
-heading. robot_localization rotates this source's body-frame velocity into
+Yaw is still fused from `/odom` despite that identity orientation, because
+identity here carries information: it is the physically guaranteed heading.
+robot_localization rotates this source's body-frame velocity into
 the world using the filter's yaw estimate, so a wrong yaw integrates
 velocity in the wrong direction. Measured 2026-07-25 with yaw taken from
 `/scan_odom` instead: rf2o's yaw was off by ~pi and the whole estimate
@@ -243,8 +243,8 @@ attempts a new scan match, and map->odom stays frozen indefinitely.
 
 Verified live: a `trigger_jerk` with the robot stationary produced no
 map->odom update at all over 30s at the old value, while real `/cmd_vel`
-motion did update it normally -- the scan-matching pipeline was never the
-problem, just this gate.
+motion did update it normally. The scan-matching pipeline was never the
+problem, only this gate.
 
 0.1m (2 resolution cells) still bounds scan-matching cost sensibly while
 letting slam_toolbox react promptly with little or no real motion.
@@ -278,9 +278,9 @@ margin over the worst sample) in
 `sim/test/localization/run_localization_drift_tests.py`. All 5 scenarios
 then pass reliably.
 
-**`auto.launch.py`'s default is `localization_mode:=amcl`, not `slam`**
+`auto.launch.py` defaults to `localization_mode:=amcl` rather than `slam`
 (set 2026-08-29, after this measurement). Pass `localization_mode:=slam`
-explicitly for the configuration this section measured.
+explicitly to get the configuration this section measured.
 
 ### Closed levers
 
@@ -317,12 +317,12 @@ conflict here: the variants that tracked true error more faithfully landed
 
 Two findings narrow where the remaining error lives:
 
-- **rf2o is not the problem.** Bagged 50s mid-run: `/odom` moved +2.272m
+- rf2o is not the problem. Bagged 50s mid-run: `/odom` moved +2.272m
   in x where true displacement was ~3.03m, while `/scan_odom` and
   `/localization/odom` both moved +2.932m, within ~3% of truth. The
   velocity-from-`/odom`, position-from-`/scan_odom` split is correcting
   slip roughly as designed.
-- **The error ramps, it doesn't spike.** Per-sample `map->odom` traces
+- The error ramps rather than spiking. Per-sample `map->odom` traces
   climb monotonically from ~0.04-0.08m at t=2s to 0.65-0.76m at t=45s,
   with the max landing on the final sample at loop-close. A
   displacement-from-start slip term should fall back as the robot returns
@@ -351,28 +351,28 @@ moving, less near zero. Isolated `noise_correction` runs improved from a
 ~40-50% pass rate to ~60-80%, consistently at both 0.25 and 0.15 slip, so
 it isn't just riding the slip reduction.
 
-But **full-suite runs FAILed both times tried** (growth_ratio 2.17 and
-2.49), worse than nearly every isolated run. The isolated-vs-suite gap was
-never explained; possibly cumulative load or residual state from the four
-scenarios that run first. Kept as a real improvement in isolation. Don't
-report `noise_correction` as passing without re-confirming in whichever
-context the claim is about.
+Full-suite runs FAILed both times tried, though (growth_ratio 2.17 and
+2.49), worse than nearly every isolated run. Nobody explained the
+isolated-vs-suite gap; it may be cumulative load or residual state from the
+four scenarios that run first. The setting is kept as a real improvement in
+isolation. Don't report `noise_correction` as passing without re-confirming
+in whichever context the claim is about.
 
 ### Measurement caveats
 
-- **Host load corrupts these numbers.** One session ran alongside ~18
+- Host load corrupts these numbers. One session ran alongside ~18
   concurrent agent sessions (load average 4-8 of 22 CPUs) and produced
   `--use-ekf` readings that couldn't separate a real config effect from
   contention. Check `uptime`/`ps aux --sort=-%cpu` before trusting any
   number near threshold.
-- **A bringup race looks like a config failure.** `amcl/get_state`
+- A bringup race looks like a config failure. `amcl/get_state`
   `async_send_request failed`, and `map_server` heartbeat timeouts ("IS
   DOWN after not receiving a heartbeat for 4000 ms") cascading to a stack
   crash, both appear under elevated load. Re-run once the host settles.
-- **The metric is a max over a 45s drive**, so a single transient
-  correction sets the whole number. That sensitivity belongs to the
-  scenario, not to any knob process noise can reach.
-- **Baselines go stale when the test geometry moves.** A 0.1642m
+- The metric is a max over a 45s drive, so a single transient correction
+  sets the whole number. That sensitivity belongs to the scenario rather
+  than to any knob process noise can reach.
+- Baselines go stale when the test geometry moves. A 0.1642m
   `amcl+ekf` result, and the 0.20m threshold derived from it, were both
   measured on a 2m loop (max corner ~1.80m from spawn) before `4f182e7`
   widened it to 3m (~2.12m). Re-derive a baseline after any geometry
