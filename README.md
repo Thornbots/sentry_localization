@@ -253,10 +253,10 @@ left at 0.05 rather than 0 to avoid relying on exact-zero comparisons.
 
 ## Tuning history (2026-07-26/27)
 
-Six sessions searched for a backend and config that passes
+On 2026-07-26 and 07-27 we searched for a backend and config that passes
 `drift_correction`/`drift_correction_obstacle` in
-`sim/test/localization/run_localization_drift_tests.py`. Collapsed here to
-the conclusions; the run-by-run logs are in this file's git history.
+`sim/test/localization/run_localization_drift_tests.py`. What follows is the
+conclusions; the run-by-run logs are in this file's git history.
 
 ### Outcome: tuned `--backend slam`, no EKF
 
@@ -332,7 +332,8 @@ Two findings narrow where the remaining error lives:
 
 ### `--backend slam --use-ekf`: worse, don't use
 
-Markedly worse than plain `--backend slam` in the same clean run:
+Markedly worse than plain `--backend slam` measured back to back on a quiet
+host:
 `drift_correction` 1.0659m vs 0.5066m, `drift_correction_obstacle` 0.8652m
 vs 0.4876m, and `noise_correction` newly failing (growth_ratio 2.42).
 Mechanism, by inspection rather than bag-level confirmation:
@@ -360,8 +361,8 @@ in whichever context the claim is about.
 
 ### Measurement caveats
 
-- Host load corrupts these numbers. One session ran alongside ~18
-  concurrent agent sessions (load average 4-8 of 22 CPUs) and produced
+- Host load corrupts these numbers. One batch of runs went out alongside
+  ~18 concurrent agent sessions (load average 4-8 of 22 CPUs) and produced
   `--use-ekf` readings that couldn't separate a real config effect from
   contention. Check `uptime`/`ps aux --sort=-%cpu` before trusting any
   number near threshold.
