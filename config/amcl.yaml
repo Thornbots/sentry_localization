@@ -12,7 +12,7 @@ amcl:
     scan_topic: /scan
 
     # Chassis is holonomic -- translates in x/y without needing to
-    # rotate to move (see SESSION_NOTES.md) -- so nav2_amcl's default
+    # rotate to move -- so nav2_amcl's default
     # DifferentialMotionModel (rotate-then-translate odometry noise) is
     # the wrong shape for this robot. OmniMotionModel adds a dedicated
     # strafe noise term instead.
@@ -47,10 +47,9 @@ amcl:
     laser_min_range: 0.15
     laser_max_range: 12.0
 
-    # Everything below is stock nav2 defaults, not yet tuned against
-    # this robot/map -- next step is comparing AMCL's localization
-    # quality against the existing slam_mode:=localization default in
-    # sim before adjusting these (see SESSION_NOTES.md).
+    # Sensor and particle-filter model. The entries carrying their own
+    # comment below (sigma_hit, do_beamskip, min/max_particles) are tuned
+    # against this robot/map; the rest are stock nav2 defaults.
     laser_model_type: likelihood_field
     max_beams: 180
     laser_likelihood_max_dist: 2.0

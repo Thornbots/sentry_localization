@@ -5,8 +5,7 @@ robot. Split out of `sentry_pkg` (which owns hardware drivers and the
 robot description). This package only consumes `/odom` + `/scan`
 and produces the corrected pose, with no direct hardware dependency. See
 `sentry_pkg/README.md` for how the two packages fit together, and the
-repo-level `SESSION_NOTES.md` / `ARCC_2026_SENTRY_CONTEXT.md` for the
-broader project context.
+repo-level `ARCC_2026_SENTRY_CONTEXT.md` for the broader project context.
 
 ## Node/topic contract with sentry_pkg
 
