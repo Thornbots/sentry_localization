@@ -1,6 +1,6 @@
+from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
-from nav_msgs.msg import Odometry
 
 
 class PassthroughOdomPublisher(Node):

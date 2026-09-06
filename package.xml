@@ -3,7 +3,7 @@
 <package format="3">
   <name>sentry_localization</name>
   <version>0.0.0</version>
-  <description>Sentry localization (SLAM/AMCL/EKF) for ARC 2026 -- turns /odom + /scan into odom-&gt;root, split out of sentry_pkg</description>
+  <description>Sentry localization (SLAM/AMCL/EKF) for ARC 2026 -- turns /odom + /scan into odom-&gt;root, split out of thornbots_pkg</description>
   <maintainer email="baptisbc@rose-hulman.edu">ubuntu</maintainer>
   <license>Apache-2.0</license>
   <test_depend>ament_copyright</test_depend>

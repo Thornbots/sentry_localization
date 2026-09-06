@@ -1,25 +1,25 @@
 # sentry_localization
 
 Localization backends (SLAM/AMCL/EKF) for the Thornbots ARC 2026 Sentry
-robot. Split out of `sentry_pkg` (which owns hardware drivers and the
+robot. Split out of `thornbots_pkg` (which owns hardware drivers and the
 robot description). This package only consumes `/odom` + `/scan`
 and produces the corrected pose, with no direct hardware dependency. See
-`sentry_pkg/README.md` for how the two packages fit together, and the
+`thornbots_pkg/README.md` for how the two packages fit together, and the
 repo-level `ARCC_2026_SENTRY_CONTEXT.md` for the broader project context.
 
-## Node/topic contract with sentry_pkg
+## Node/topic contract with thornbots_pkg
 
 - Input: `/odom` (`nav_msgs/Odometry`, raw/uncorrected wheel odometry,
-  published by `sentry_pkg`'s `pose_translator`) and `/scan`
-  (`sensor_msgs/LaserScan`, from `sentry_pkg`'s lidar driver or `sim`).
+  published by `thornbots_pkg`'s `pose_translator`) and `/scan`
+  (`sensor_msgs/LaserScan`, from `thornbots_pkg`'s lidar driver or `sim`).
 - Output: **`/localization/odom`** (`nav_msgs/Odometry`), always: every
-  `localization_mode` below publishes this topic, so `sentry_pkg`'s
+  `localization_mode` below publishes this topic, so `thornbots_pkg`'s
   `odom_tf_broadcaster` (which turns it into `odom->root` TF) never needs
   to know which backend is active.
 - `map->odom` TF (for the map-based backends) is broadcast directly by
-  `slam_toolbox`/`amcl`, not indirected through `sentry_pkg`.
+  `slam_toolbox`/`amcl`, not indirected through `thornbots_pkg`.
 
-Normally you don't launch this package directly, since `sentry_pkg/launch/
+Normally you don't launch this package directly, since `thornbots_pkg/launch/
 auto.launch.py` includes `launch/localization.launch.py` and forwards the
 relevant args. Direct use (e.g. for testing) looks like:
 
@@ -64,7 +64,7 @@ backend plus EKF-fused odometry underneath it).
 - `load_map` (default `true`): deserialize the saved pose graph at startup
   instead of starting blank. Only meaningful for `slam`/`mapping`.
 - `odom_frame` (default `odom`).
-- `use_sim_time`: normally forwarded by `sentry_pkg/auto.launch.py`
+- `use_sim_time`: normally forwarded by `thornbots_pkg/auto.launch.py`
   (derived from its `real_hardware` arg), not set directly.
 
 ## Nodes (`sentry_localization/`)
@@ -75,7 +75,7 @@ only node here.
 
 The drift-correction relay that used to live here as
 `slam_relocalize_publisher.py` (SLAM-specific, compared a `map->root` TF
-against the MCB's raw pose) moved to `sentry_pkg/mcb_relay.py`, which
+against the MCB's raw pose) moved to `thornbots_pkg/mcb_relay.py`, which
 compares `/localization/odom` against `/odom` directly instead of doing a
 TF lookup.
 
@@ -84,7 +84,7 @@ TF lookup.
 The drift/jerk-correction integration suite lives in
 `sim/test/localization/run_localization_drift_tests.py`; see
 `sim/README.md`'s Testing section. It launches this package via
-`sentry_pkg`'s `auto.launch.py` and reads these `config/*.yaml` files, so
+`thornbots_pkg`'s `auto.launch.py` and reads these `config/*.yaml` files, so
 the "rebuild after editing config" caveat documented there applies here
 too.
 
