@@ -1,6 +1,6 @@
 amcl:
   ros__parameters:
-    # Frames match the rest of sentry_pkg's TF tree (see slam.yaml's
+    # Frames match the rest of thornbots_pkg's TF tree (see slam.yaml's
     # equivalent comment) -- odom_frame_id/base_frame_id/global_frame_id
     # are overridden again from auto.launch.py to stay in sync with the
     # odom_frame launch arg; the values below are just this file's own

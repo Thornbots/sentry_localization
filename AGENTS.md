@@ -6,7 +6,7 @@ docs live in `README.md`**; its `## Notes` section holds the per-parameter
 tuning rationale and the dated measurement history that justifies the current
 values. Read that before changing any YAML.
 
-Launch through `sentry_pkg`'s `auto.launch.py`, which includes this package's
+Launch through `thornbots_pkg`'s `auto.launch.py`, which includes this package's
 `localization.launch.py`. Don't launch it standalone.
 
 **Two ways an edit here silently does nothing:**
@@ -36,7 +36,7 @@ The drift/jerk suite lives in
   `slam` / `mapping` / `none`) picks the `map->odom` owner, `use_ekf`
   independently picks the `odom->root` source.
 - No direct hardware dependency; drivers, URDF, and the MCB relay belong to
-  `../sentry_pkg`.
+  `../thornbots_pkg`.
 
 ## Open
 
