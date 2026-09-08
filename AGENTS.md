@@ -11,10 +11,10 @@ Launch through `thornbots_pkg`'s `auto.launch.py`, which includes this package's
 
 **Two ways an edit here silently does nothing:**
 
-1. **`ros2_ws` shadowing.** `Dockerfile.thornbots` clones this package
-   (`RECLONE_LOCALIZATION`) into `/workspaces/ros2_ws`. Once it's built locally,
+1. **`ros2_ws` shadowing.** `Dockerfile.thornbots` copies this package into
+   `/workspaces/ros2_ws` at build time. Once it's built locally,
    `dexec.sh` picks up your `src/` edit but the user's terminal resolves to the
-   image-baked clone. Confirm with
+   image-baked snapshot. Confirm with
    `../isaac_ros_common/scripts/dexec.sh -- ros2 pkg prefix sentry_localization`
    (`/workspaces/isaac_ros-dev/…` = your edit is live).
 2. **Config files are copied at build time**, not read from `src/`. After
