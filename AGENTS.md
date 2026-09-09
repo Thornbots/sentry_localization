@@ -40,13 +40,15 @@ The drift/jerk suite lives in
 
 ## Open
 
-- **rf2o publishes all-zero covariance**, which reads to the EKF as "infinitely
-  certain." Needs a real commit to `Thornbots/rf2o_laser_odometry`. A
-  container-local patch script (`rf2o_cov_patch.py`, x/y variance `0.02**2`, yaw
-  `0.05**2`, unobserved axes `1e6`) once existed but is gone from disk — assume
-  nothing is applied and redo it from scratch. On its own it moved measured
-  accuracy by essentially nothing; the scan-convention bug was doing all the
-  damage.
+- **rf2o's covariance defaults have never been measured.** The all-zero
+  covariance is fixed in the fork (`Thornbots/rf2o_laser_odometry` `78d6a05`,
+  2026-09-08): the node now fills the diagonal from `position_covariance`
+  (`0.02**2`), `yaw_covariance` (`0.05**2`), `linear_velocity_covariance`
+  (`0.05**2`) and `angular_velocity_covariance` (`0.1**2`), with unobserved axes
+  at `1e6`. Those numbers were chosen to sit near wheel-encoder uncertainty, not
+  derived from data, and the drift suite in `../sim/test/localization/` has not
+  been run against them. Fixing the covariance alone moved measured accuracy by
+  essentially nothing; the scan-convention bug was doing all the damage.
 - **Sanity-gate rf2o's output against wheel odometry before the EKF, but
   asymmetrically.** Wheel odometry drifts slowly under normal conditions and
   slips on the ARCC "Bumpy Road" zone; lidar data quality is good. So
