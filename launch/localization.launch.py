@@ -18,7 +18,7 @@ Launch sentry_localization's map/odom localization stack.
 Two orthogonal axes control localization:
 - localization_mode (slam/mapping/amcl/none) picks who owns map->odom --
   slam_toolbox, amcl, or nobody (none). This is the map layer.
-- use_ekf (bool, default false) picks who owns odom->root: raw passthrough
+- use_ekf (bool, default true) picks who owns odom->root: raw passthrough
   of /odom (false), or EKF fusion of /odom + /scan_odom via ekf_node +
   rf2o_laser_odometry_node (true). This is independent of localization_mode
   -- use_ekf:=true can be layered on top of any localization_mode, including
@@ -95,7 +95,7 @@ def generate_launch_description():
         'owns odom->root.'
     )
     use_ekf_arg = DeclareLaunchArgument(
-        'use_ekf', default_value='false',
+        'use_ekf', default_value='true',
         description='Whether odom->root is EKF-fused (ekf_node + '
         'rf2o_laser_odometry_node) instead of passed through '
         'raw from /odom. Independent of localization_mode -- '
