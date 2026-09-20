@@ -60,3 +60,10 @@ The drift/jerk suite lives in
   rf2o/`odom` disagreement during a slip is exactly the signal the EKF should
   trust, not discard. The gate should catch rf2o's own failure modes only, not
   arbitrate normal disagreement.
+
+## Committing
+
+This package is a submodule of `thornbots_workspace`, on branch `main`. Commit
+and push here first, then bump this gitlink in `../` — one logical change, one
+bump, never a gitlink pointing at an unpushed commit. Full rule in
+`../CLAUDE.md` § Packages.
