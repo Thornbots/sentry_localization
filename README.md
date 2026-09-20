@@ -36,8 +36,12 @@ ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 
 | Value | Source |
 | --- | --- |
-| `false` (default) | `passthrough_odom_publisher`, relays `/odom` unchanged |
+| `false` | `passthrough_odom_publisher`, relays `/odom` unchanged |
 | `true` | `robot_localization`'s `ekf_node`, fusing `/odom` and rf2o's `/scan_odom` |
+
+`true` is the default in both this file and `auto.launch.py` (since
+2026-09-20), so the stack runs rf2o + the EKF unless you pass
+`use_ekf:=false`.
 
 `use_ekf:=true` also starts `rf2o_laser_odometry_node` on raw `/scan`. The
 Thornbots fork re-queries `lidar->root` every scan, so the head-mounted lidar
