@@ -64,8 +64,8 @@ compares `/localization/odom` with `/odom` instead of looking up TF.
 
 ## Testing
 
-The drift and jerk suite is
-`sim/test/localization/run_localization_drift_tests.py`; see `sim/README.md`.
+The drift and jerk suite is `ros2 launch sim localization_tests.launch.py`;
+see `sim/README.md`.
 It reads these `config/*.yaml` files from `install/`, so rebuild with
 `--symlink-install` after editing them.
 
