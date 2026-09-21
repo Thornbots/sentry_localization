@@ -30,9 +30,8 @@ Launch through `thornbots_pkg`'s `auto.launch.py`, which includes this package's
 
 ## Testing
 
-The drift/jerk suite lives in
-`../sim/test/localization/run_localization_drift_tests.py`; see
-`../sim/AGENTS.md`. Run it after tuning `slam.yaml`, `amcl.yaml`, `ekf.yaml`, or
+The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
+(tests in `../sim/test/localization/`); see `../sim/AGENTS.md`. Run it after tuning `slam.yaml`, `amcl.yaml`, `ekf.yaml`, or
 `sim`'s noise model.
 
 ## Scope
