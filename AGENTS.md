@@ -58,8 +58,8 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
   (`0.02**2`), `yaw_covariance` (`0.05**2`), `linear_velocity_covariance`
   (`0.05**2`) and `angular_velocity_covariance` (`0.1**2`), with unobserved axes
   at `1e6`. Those numbers were chosen to sit near wheel-encoder uncertainty, not
-  derived from data, and the drift suite in `../sim/test/localization/` has not
-  been run against them. Fixing the covariance alone moved measured accuracy by
+  derived from data. The drift suite passes with them at amcl + EKF
+  (2026-09-24), but nobody has tuned them against it. Fixing the covariance alone moved measured accuracy by
   essentially nothing; the scan-convention bug was doing all the damage.
 - **Sanity-gate rf2o's output against wheel odometry before the EKF, but
   asymmetrically.** Wheel odometry drifts slowly under normal conditions and
