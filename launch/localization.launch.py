@@ -191,7 +191,6 @@ def generate_launch_description():
             'base_frame_id': 'root',
             'odom_frame_id': LaunchConfiguration('odom_frame'),
             'init_pose_from_topic': '',
-            'freq': 20.0,
             # The chassis never rotates (ekf.yaml); without this rf2o's
             # heading drifts and rotates its x/y.
             'fixed_heading': True,
