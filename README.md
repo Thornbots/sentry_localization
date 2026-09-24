@@ -90,6 +90,14 @@ one already rejected.
   assumes a rigid mount. The fork (built by `isaac_ros_common`'s Dockerfile)
   re-queries every scan, so the old `head_home_scan_gate` and its
   `/scan_gated` topic are gone.
+- rf2o runs with `fixed_heading: true` and `odom_prior_topic: /odom`. The
+  chassis never turns, so rf2o's accumulated yaw error would only rotate its
+  x/y. Its own velocity prior is the previous scan's motion, so every move
+  from rest started with a prior of "stopped" and came up short: legs of
+  x0.86-0.98 at 4 m/s in sim, only in some directions. Seeded with wheel
+  odometry's motion between the two scans, every leg reads x1.00 and the
+  EKF's mean error (0.050 m) beats raw `/odom` (0.134 m) on `suite:=ekf`,
+  real time, `sentry_v2`.
 
 ### config/amcl.yaml
 

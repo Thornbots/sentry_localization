@@ -44,6 +44,14 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
 
 ## Open
 
+- **rf2o runs with `fixed_heading: true` and `odom_prior_topic: /odom`**
+  (`localization.launch.py`). The first pins its yaw, since the chassis is
+  assumed never to rotate; the second seeds each scan match with wheel
+  odometry's motion in place of rf2o's constant-velocity guess, which read
+  "stopped" at the start of every move and undershot it. Together they put
+  the EKF under raw `/odom` in sim (`suite:=ekf`, real time). Unmeasured on
+  hardware. The real robot may drift 1-5 deg in yaw, and `sentry_v2` in sim
+  picks up ~1 deg in hard corners; noted, not acted on.
 - **rf2o's covariance defaults have never been measured.** The all-zero
   covariance is fixed in the fork (`Thornbots/rf2o_laser_odometry` `78d6a05`,
   2026-09-08): the node now fills the diagonal from `position_covariance`

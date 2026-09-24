@@ -192,6 +192,12 @@ def generate_launch_description():
             'odom_frame_id': LaunchConfiguration('odom_frame'),
             'init_pose_from_topic': '',
             'freq': 20.0,
+            # The chassis never rotates (ekf.yaml); without this rf2o's
+            # heading drifts and rotates its x/y.
+            'fixed_heading': True,
+            # Seed each scan match with wheel odometry's motion; rf2o's own
+            # constant-velocity guess undershoots every move from rest.
+            'odom_prior_topic': '/odom',
             'use_sim_time': use_sim_time,
         }],
     )
