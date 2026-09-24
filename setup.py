@@ -39,8 +39,8 @@ setup(
     # never runs.
     tests_require=['pytest'],
     zip_safe=True,
-    maintainer='ubuntu',
-    maintainer_email='baptisbc@rose-hulman.edu',
+    maintainer='Thornbots',
+    maintainer_email='baptisbc@RHIT.edu',
     description='Sentry localization (SLAM/AMCL/EKF) for RHIT Thornbots ARC 2026',
     license='Apache-2.0',
     entry_points={
