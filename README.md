@@ -126,8 +126,9 @@ obstacle cases together.
 about one sigma, so at 0.2 amcl can't tell poses within ~0.2m apart. That
 matched `unmapped_obstacle`'s ~0.2-0.3m noise floor, where the alpha,
 `resample_interval` and particle knobs all plateaued, pointing at the sensor
-model. Sim's lidar now matches the RPLIDAR A2M8's ~3000 points, which should
-support a sharper match. 0.15 measured worse (see Tuning history). Re-derive
+model. Sim's lidar now matches the RPLIDAR A2M8 in its typical mode: ~800
+beams, 0.01 m noise. 0.15 measured worse (see Tuning history), but
+before this lidar change, and nothing has been re-measured since. Re-derive
 rather than treating 0.08 as final, and check a sharper field doesn't make
 amcl brittle to real sensor noise.
 
