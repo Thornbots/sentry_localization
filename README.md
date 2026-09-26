@@ -84,8 +84,11 @@ one already rejected.
   nothing for `amcl` or `none`.
 - `use_map_saver` is on only in `mapping`, so saving a map is always a
   deliberate choice.
-- `map_server` and `amcl` are nav2 lifecycle nodes, activated by a
-  `lifecycle_manager` with `autostart: true`.
+- `map_server`, `amcl` and (since Jazzy) `slam_toolbox` are lifecycle
+  nodes, each activated by a `lifecycle_manager` with `autostart: true`:
+  `lifecycle_manager_localization` for amcl, `lifecycle_manager_slam` for
+  slam_toolbox. Without it slam_toolbox sits unconfigured and never
+  publishes `map->odom`.
 - rf2o used to cache its lidar->root transform from the first scan, which
   assumes a rigid mount. The fork (built by `isaac_ros_common`'s Dockerfile)
   re-queries every scan, so the old `head_home_scan_gate` and its
