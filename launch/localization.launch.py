@@ -122,6 +122,10 @@ def generate_launch_description():
         ["'", localization_mode, "' == 'mapping' and '",
          LaunchConfiguration('load_map'), "' == 'false'"]
     )
+    slam_toolbox_selected = PythonExpression(
+        ["'", localization_mode, "' == 'mapping' or ('", localization_mode,
+         "' == 'slam' and '", LaunchConfiguration('load_map'), "' == 'true')"]
+    )
     slam_toolbox_mode_param = PythonExpression(
         ["'mapping' if '", localization_mode, "' == 'mapping' "
          "else 'localization'"]
@@ -271,6 +275,7 @@ def generate_launch_description():
                 'use_map_saver': ParameterValue(
                     mapping_selected, value_type=bool
                 ),
+                'use_lifecycle_manager': True,
             },
         ],
     )
@@ -291,8 +296,24 @@ def generate_launch_description():
                 # map to localize against without load_map anyway.
                 'mode': 'mapping',
                 'use_map_saver': True,
+                'use_lifecycle_manager': True,
             },
         ],
+    )
+
+    # slam_toolbox is a lifecycle node since Jazzy (2.8) and starts
+    # unconfigured; same bring-up as amcl's lifecycle manager above.
+    slam_lifecycle_manager_node = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_slam',
+        output='screen',
+        condition=IfCondition(slam_toolbox_selected),
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'autostart': True,
+            'node_names': ['slam_toolbox'],
+        }],
     )
 
     return LaunchDescription([
@@ -302,5 +323,6 @@ def generate_launch_description():
         passthrough_odom_node, ekf_node,
         scan_odom_node,
         slam_toolbox_with_map_node, slam_toolbox_no_map_node,
+        slam_lifecycle_manager_node,
         map_server_node, amcl_node, amcl_lifecycle_manager_node,
     ])
