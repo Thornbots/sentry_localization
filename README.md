@@ -102,6 +102,38 @@ one already rejected.
   EKF's mean error (0.050 m) beats raw `/odom` (0.134 m) on `suite:=ekf`,
   real time, `sentry_v2`.
 
+### config/rf2o.yaml
+
+rf2o grades every scan match good, degraded or failed, from its own
+evidence only: whether it solved, the fraction of valid beams, the match's
+own covariance (`cov_odo`), a 6 m/s speed limit, scan gaps, and a stale
+lidar extrinsic. It never compares against `/odom`, because on Bumpy Road
+the wheels slip and rf2o is the one that's right.
+
+- good: `position_covariance` (0.02 m std-dev).
+- degraded: adds `degraded_position_variance` along each weak axis of
+  the match, so a single long wall in view inflates only the along-wall
+  axis.
+- failed: the match is discarded and the pose advances by `/odom`'s motion
+  between the two scans, so rf2o's pose never jumps. The variance grows by
+  `failed_variance_rate` per second failed and sheds over
+  `recovery_matches` good matches. Without `/odom` covering both stamps,
+  nothing is published for that scan.
+
+The grade has to act on the increment, not on publishing. rf2o's pose
+accumulates, so dropping a bad message leaves its error in every later
+one, and the EKF's Mahalanobis gate would lock rf2o out after one jump.
+
+Every grade is on `/scan_odom/quality` (`diagnostic_msgs/DiagnosticArray`,
+scan stamp) with the signals as values, whether `confidence_enabled` is on
+or not. With it off, the topic reports what would have happened. The
+thresholds are unmeasured guesses; set them from that topic's distributions
+over the drift suite.
+
+Two upstream bugs are fixed with it, in every mode: a failed match used to
+republish the previous pose at full confidence, and a scan with too few
+points on every pyramid level read as zero motion.
+
 ### config/amcl.yaml
 
 `robot_model_type` is `nav2_amcl::OmniMotionModel`, with its strafe noise
