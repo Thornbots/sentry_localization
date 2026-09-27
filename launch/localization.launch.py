@@ -43,6 +43,7 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('sentry_localization')
     slam_params_file = os.path.join(pkg_share, 'config', 'slam.yaml')
     ekf_params_file = os.path.join(pkg_share, 'config', 'ekf.yaml')
+    rf2o_params_file = os.path.join(pkg_share, 'config', 'rf2o.yaml')
     amcl_params_file = os.path.join(pkg_share, 'config', 'amcl.yaml')
 
     use_sim_time_arg = DeclareLaunchArgument(
@@ -188,7 +189,8 @@ def generate_launch_description():
         name='rf2o_laser_odometry',
         output='screen',
         condition=IfCondition(ekf_selected),
-        parameters=[{
+        # Covariance and match confidence; see config/rf2o.yaml.
+        parameters=[rf2o_params_file, {
             'laser_scan_topic': '/scan',
             'odom_topic': '/scan_odom',
             'publish_tf': False,

@@ -52,21 +52,13 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
   the EKF under raw `/odom` in sim (`suite:=ekf`, real time). Unmeasured on
   hardware. The real robot may drift 1-5 deg in yaw, and `sentry_v2` in sim
   picks up ~1 deg in hard corners; noted, not acted on.
-- **rf2o's covariance defaults have never been measured.** The all-zero
-  covariance is fixed in the fork (`Thornbots/rf2o_laser_odometry` `78d6a05`,
-  2026-09-08): the node now fills the diagonal from `position_covariance`
-  (`0.02**2`), `yaw_covariance` (`0.05**2`), `linear_velocity_covariance`
-  (`0.05**2`) and `angular_velocity_covariance` (`0.1**2`), with unobserved axes
-  at `1e6`. Those numbers were chosen to sit near wheel-encoder uncertainty, not
-  derived from data. The drift suite passes with them at amcl + EKF
-  (2026-09-24), but nobody has tuned them against it. Fixing the covariance alone moved measured accuracy by
-  essentially nothing; the scan-convention bug was doing all the damage.
-- **Sanity-gate rf2o's output against wheel odometry before the EKF, but
-  asymmetrically.** Wheel odometry drifts slowly under normal conditions and
-  slips on the ARCC "Bumpy Road" zone; lidar data quality is good. So
-  rf2o/`odom` disagreement during a slip is exactly the signal the EKF should
-  trust, not discard. The gate should catch rf2o's own failure modes only, not
-  arbitrate normal disagreement.
+- **rf2o's covariance and grading values are unmeasured.** They are in
+  `config/rf2o.yaml`; README.md Notes says what each does. rf2o grades every
+  match from its own evidence and never against `/odom`, so a slip still
+  corrects the EKF. Set the thresholds from `/scan_odom/quality`'s
+  distributions over the drift suite, then check `scan_degraded` (sim) and
+  `drift_correction` at 0.15 slip, which is the check that slip still gets
+  through.
 - **Jazzy: the drift suite and `suite:=ekf` give Humble's
   verdicts on the laptop.** No config key was renamed or removed. Defaults
   that changed or appeared, none of which we set: amcl

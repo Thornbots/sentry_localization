@@ -1,0 +1,27 @@
+### rf2o_laser_odometry's covariance and match-confidence parameters.
+### Topics, frames, fixed_heading and odom_prior_topic stay in
+### localization.launch.py. Every value here is an unmeasured starting
+### guess; README.md Notes says what each one does and what to measure.
+rf2o_laser_odometry:
+  ros__parameters:
+    # Floor variances on /scan_odom (m^2, rad^2). The EKF fuses rf2o's x/y
+    # as an absolute pose, so position_covariance is a weight against
+    # wheel velocity, not the pose's true (growing) uncertainty.
+    position_covariance: 0.0004         # 0.02**2
+    yaw_covariance: 0.0025              # 0.05**2
+    linear_velocity_covariance: 0.0025  # 0.05**2
+    angular_velocity_covariance: 0.01   # 0.1**2
+
+    # Grade each scan match good / degraded / failed from rf2o's own
+    # evidence (never /odom, so wheel slip can't lower confidence). A
+    # failed match advances the pose on /odom's increment instead.
+    # Grades are published on /scan_odom/quality either way.
+    confidence_enabled: true
+    min_valid_fraction: 0.5      # valid beams below this: degraded
+    fail_valid_fraction: 0.25    # below this: failed
+    max_match_sigma: 0.01        # m, match std-dev on any axis: degraded
+    max_speed: 6.0               # m/s; the chassis tops out near 4
+    degraded_position_variance: 0.01  # m^2 added along each weak axis
+    failed_variance_rate: 0.05   # m^2 per second spent failed
+    max_failed_variance: 1.0     # m^2
+    recovery_matches: 20         # good matches to shed the failed variance

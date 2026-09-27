@@ -55,6 +55,11 @@ ekf_filter_node:
     odom0_relative: false
 
     odom1: /scan_odom
+    # rf2o's x/y covariance changes per scan with its match grade
+    # (config/rf2o.yaml): a weight against odom0's velocity, not the
+    # absolute pose's true uncertainty. Leave odom1_pose_rejection_threshold
+    # unset: rf2o's pose accumulates, so it would reject every message after
+    # one jump, and it would reject slip corrections too.
     # Position only -- yaw deliberately NOT fused from rf2o. Its yaw was
     # measured off by ~pi (see odom0_config above), and the chassis heading
     # is pinned by odom0 anyway, so there is nothing for rf2o's yaw to
