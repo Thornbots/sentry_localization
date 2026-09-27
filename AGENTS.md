@@ -67,12 +67,14 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
   rf2o/`odom` disagreement during a slip is exactly the signal the EKF should
   trust, not discard. The gate should catch rf2o's own failure modes only, not
   arbitrate normal disagreement.
-- **Jazzy (this branch): ported, drift suite not yet run.** No config key
-  was renamed or removed. Defaults that changed or appeared, none of which
-  we set: amcl `freespace_downsampling` (false), slam_toolbox `restamp_tf`
-  and `check_min_dist_and_heading_precisely` (false), robot_localization
-  `odomN_pose_use_child_frame` (false). All keep Humble's behaviour. If a
-  drift verdict moves, look at Harmonic first. `../JAZZY_PLAN.md` step 4.
+- **Jazzy (this branch): the drift suite and `suite:=ekf` give Humble's
+  verdicts on the laptop.** No config key was renamed or removed. Defaults
+  that changed or appeared, none of which we set: amcl
+  `freespace_downsampling` (false), slam_toolbox `restamp_tf` and
+  `check_min_dist_and_heading_precisely` (false), robot_localization
+  `odomN_pose_use_child_frame` (false). All keep Humble's behaviour.
+  robot_localization 3.8 logs "Failed to meet update rate!" at ERROR where
+  Humble's printed it untagged; `sim`'s drift harness skips that line.
 
 ## Committing
 
