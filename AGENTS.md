@@ -67,7 +67,7 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
   rf2o/`odom` disagreement during a slip is exactly the signal the EKF should
   trust, not discard. The gate should catch rf2o's own failure modes only, not
   arbitrate normal disagreement.
-- **Jazzy (this branch): the drift suite and `suite:=ekf` give Humble's
+- **Jazzy: the drift suite and `suite:=ekf` give Humble's
   verdicts on the laptop.** No config key was renamed or removed. Defaults
   that changed or appeared, none of which we set: amcl
   `freespace_downsampling` (false), slam_toolbox `restamp_tf` and
