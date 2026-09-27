@@ -67,9 +67,8 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
   rf2o/`odom` disagreement during a slip is exactly the signal the EKF should
   trust, not discard. The gate should catch rf2o's own failure modes only, not
   arbitrate normal disagreement.
-- **Jazzy: drop `setup.py`'s `tests_require`, and diff `config/*.yaml`
-  against the Jazzy Nav2, slam_toolbox and robot_localization defaults** if
-  the drift suite's verdicts move. `../JAZZY_PLAN.md` steps 3 and 4.
+- **Jazzy:** ported on this repo's `jazzy` branch; its `AGENTS.md` has the
+  state. Commit Humble work here until the cutover.
 
 ## Committing
 
