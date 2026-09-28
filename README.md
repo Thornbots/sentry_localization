@@ -108,7 +108,8 @@ one already rejected.
 rf2o grades every scan match good, degraded or failed, from its own
 evidence only: whether it solved, the fraction of valid beams, the match's
 own covariance (`cov_odo`), a 6 m/s speed limit, scan gaps, and a stale
-lidar extrinsic. It never compares against `/odom`, because on Bumpy Road
+lidar extrinsic (the latest head TF more than `max_extrinsic_age` older
+than the scan). It never compares against `/odom`, because on Bumpy Road
 the wheels slip and rf2o is the one that's right.
 
 - good: `position_covariance` (0.02 m std-dev).
@@ -127,9 +128,13 @@ one, and the EKF's Mahalanobis gate would lock rf2o out after one jump.
 
 Every grade is on `/scan_odom/quality` (`diagnostic_msgs/DiagnosticArray`,
 scan stamp) with the signals as values, whether `confidence_enabled` is on
-or not. With it off, the topic reports what would have happened. The
-thresholds are unmeasured guesses; set them from that topic's distributions
-over the drift suite.
+or not. With it off, the topic reports what would have happened.
+`sim/tools/rf2o_quality.py` records it and prints the distributions.
+
+Until 2026-09-28 any extrinsic not exactly at the scan's stamp was stale.
+The lidar rides the head's yaw joint, whose TF trails every scan by one
+sim step (0.01 s), so 94% of clean matches graded degraded and the EKF
+leaned on `/odom`: `suite:=ekf` fell from ~95% to 75-80% better than raw.
 
 Two upstream bugs are fixed with it, in every mode: a failed match used to
 republish the previous pose at full confidence, and a scan with too few

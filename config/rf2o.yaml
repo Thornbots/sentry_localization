@@ -21,6 +21,7 @@ rf2o_laser_odometry:
     fail_valid_fraction: 0.25    # below this: failed
     max_match_sigma: 0.01        # m, match std-dev on any axis: degraded
     max_speed: 6.0               # m/s; the chassis tops out near 4
+    max_extrinsic_age: 0.1       # s; the head's TF trails each scan 0.01 s in sim
     degraded_position_variance: 0.01  # m^2 added along each weak axis
     failed_variance_rate: 0.05   # m^2 per second spent failed
     max_failed_variance: 1.0     # m^2
