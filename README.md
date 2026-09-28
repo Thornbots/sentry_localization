@@ -27,12 +27,13 @@ ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 | `slam` | `slam_toolbox`, localization mode | localize against the saved field map |
 | `mapping` | `slam_toolbox`, mapping mode | build or extend the map |
 | `amcl` | `nav2_amcl` + `nav2_map_server` | particle filter on a saved occupancy grid |
-| `none` | no map frame | odometry only, usually with `use_ekf:=true` |
+| `none` | no map frame | odometry only, usually with `use_rf2o:=true` |
 
 `localization.launch.py` defaults to `slam`; `auto.launch.py` defaults to
 `amcl` (since 2026-08-29).
 
-`use_ekf` picks the `/localization/odom` source, with any mode:
+`use_rf2o` (named `use_ekf` before 2026-09-28) picks the `/localization/odom`
+source, with any mode:
 
 | Value | Source |
 | --- | --- |
@@ -41,9 +42,9 @@ ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 
 `true` is the default in both this file and `auto.launch.py` (since
 2026-09-20), so the stack runs rf2o + the EKF unless you pass
-`use_ekf:=false`.
+`use_rf2o:=false`.
 
-`use_ekf:=true` also starts `rf2o_laser_odometry_node` on raw `/scan`. The
+`use_rf2o:=true` also starts `rf2o_laser_odometry_node` on raw `/scan`. The
 Thornbots fork re-queries `lidar->root` every scan, so the head-mounted lidar
 can move.
 
@@ -284,7 +285,7 @@ Two findings locate the remaining error:
   should shrink as the robot returns to its start corner, so this looks like
   path-length drift in the fused estimate upstream of amcl, not filter noise.
 
-### `slam --use-ekf`: worse
+### `slam --use-rf2o`: worse
 
 Back to back on a quiet host against plain `slam`: `drift_correction`
 1.0659m vs 0.5066m, `drift_correction_obstacle` 0.8652m vs 0.4876m, and
@@ -296,7 +297,7 @@ correction and slam_toolbox's correction stack on the same lidar data.
 ### Measurement caveats
 
 - Host load corrupts results. One batch ran beside ~18 agent sessions (load
-  4-8 on 22 CPUs) and its `--use-ekf` numbers were unusable. Check `uptime`
+  4-8 on 22 CPUs) and its `--use-rf2o` numbers were unusable. Check `uptime`
   and `ps aux --sort=-%cpu` before trusting a number near threshold.
 - Bringup races look like config failures: `amcl/get_state`
   `async_send_request failed`, or `map_server` "IS DOWN after not receiving
