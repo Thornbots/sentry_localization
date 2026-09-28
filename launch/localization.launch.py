@@ -18,14 +18,14 @@ Launch sentry_localization's map/odom localization stack.
 Two orthogonal axes control localization:
 - localization_mode (slam/mapping/amcl/none) picks who owns map->odom --
   slam_toolbox, amcl, or nobody (none). This is the map layer.
-- use_ekf (bool, default true) picks who owns odom->root: raw passthrough
-  of /odom (false), or EKF fusion of /odom + /scan_odom via ekf_node +
-  rf2o_laser_odometry_node (true). This is independent of localization_mode
-  -- use_ekf:=true can be layered on top of any localization_mode, including
+- use_rf2o (bool, default true) picks who owns odom->root: raw passthrough
+  of /odom (false), or rf2o's /scan_odom fused with /odom by ekf_node
+  (true). This is independent of localization_mode
+  -- use_rf2o:=true can be layered on top of any localization_mode, including
   none (the old map-free "ekf mode" configuration).
 Result always published on /localization/odom regardless of backend.
 load_map:=true (default) loads map_file's saved pose graph at startup.
-See README.md's localization_mode/use_ekf tables/Notes section for detail.
+See README.md's localization_mode/use_rf2o tables/Notes section for detail.
 """
 import os
 
@@ -92,19 +92,19 @@ def generate_launch_description():
         choices=['slam', 'mapping', 'amcl', 'none'],
         description='Selects who owns map->odom -- see the module '
         'docstring for what each of slam/mapping/amcl/none '
-        'actually launches. Independent of use_ekf, which '
+        'actually launches. Independent of use_rf2o, which '
         'owns odom->root.'
     )
-    use_ekf_arg = DeclareLaunchArgument(
-        'use_ekf', default_value='true',
-        description='Whether odom->root is EKF-fused (ekf_node + '
-        'rf2o_laser_odometry_node) instead of passed through '
-        'raw from /odom. Independent of localization_mode -- '
+    use_rf2o_arg = DeclareLaunchArgument(
+        'use_rf2o', default_value='true',
+        description='Whether rf2o scan odometry is fused into odom->root '
+        '(rf2o_laser_odometry_node, fused by ekf_node) instead of '
+        'passing /odom through raw. Independent of localization_mode -- '
         'layers on top of slam/mapping/amcl/none.'
     )
     localization_mode = LaunchConfiguration('localization_mode')
     ekf_selected = PythonExpression(
-        ["'", LaunchConfiguration('use_ekf'), "' == 'true'"]
+        ["'", LaunchConfiguration('use_rf2o'), "' == 'true'"]
     )
     amcl_selected = PythonExpression(
         ["'", localization_mode, "' == 'amcl'"]
@@ -113,7 +113,7 @@ def generate_launch_description():
         ["'", localization_mode, "' == 'mapping'"]
     )
     passthrough_selected = PythonExpression(
-        ["'", LaunchConfiguration('use_ekf'), "' != 'true'"]
+        ["'", LaunchConfiguration('use_rf2o'), "' != 'true'"]
     )
     slam_toolbox_with_map_selected = PythonExpression(
         ["'", localization_mode, "' in ('slam', 'mapping') and '",
@@ -182,7 +182,7 @@ def generate_launch_description():
         ],
     )
 
-    # Only used when use_ekf:=true; nothing else reads /scan_odom.
+    # Only used when use_rf2o:=true; nothing else reads /scan_odom.
     scan_odom_node = Node(
         package='rf2o_laser_odometry',
         executable='rf2o_laser_odometry_node',
@@ -321,7 +321,7 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
-        use_ekf_arg,
+        use_rf2o_arg,
         passthrough_odom_node, ekf_node,
         scan_odom_node,
         slam_toolbox_with_map_node, slam_toolbox_no_map_node,

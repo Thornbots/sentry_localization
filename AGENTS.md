@@ -37,7 +37,7 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
 ## Scope
 
 - Owns the backends and their tuning; `localization_mode` (`amcl` default /
-  `slam` / `mapping` / `none`) picks the `map->odom` owner, `use_ekf`
+  `slam` / `mapping` / `none`) picks the `map->odom` owner, `use_rf2o`
   independently picks the `odom->root` source.
 - No direct hardware dependency; drivers, URDF, and the MCB relay belong to
   `../thornbots_pkg`.
