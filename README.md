@@ -131,6 +131,16 @@ scan stamp) with the signals as values, whether `confidence_enabled` is on
 or not. With it off, the topic reports what would have happened.
 `sim/tools/rf2o_quality.py` records it and prints the distributions.
 
+Over the drift suite (2026-09-28, amcl, `--use-rf2o`, 2418 matches), every
+match in the five clean scenarios graded good bar each stack's first scan.
+Clean driving's worst: valid fraction 0.64, sigma 1.5 mm, 4.03 m/s,
+extrinsic 0.04 s old. The rest landed where meant: jerks and `odom_stuck`
+failed on speed (7-18 m/s), `scan_degraded`'s 60 deg arc failed on
+`few_points` (0.10-0.17). Grading that arc degraded instead
+(`fail_valid_fraction` 0.05) read 0.377 and 0.417 m during the blackout
+against 0.415 and 0.434 m failed: within run-to-run spread, so it stays
+failed.
+
 Until 2026-09-28 any extrinsic not exactly at the scan's stamp was stale.
 The lidar rides the head's yaw joint, whose TF trails every scan by one
 sim step (0.01 s), so 94% of clean matches graded degraded and the EKF

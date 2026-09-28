@@ -52,13 +52,11 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
   the EKF under raw `/odom` in sim (`suite:=ekf`, real time). Unmeasured on
   hardware. The real robot may drift 1-5 deg in yaw, and `sentry_v2` in sim
   picks up ~1 deg in hard corners; noted, not acted on.
-- **rf2o's covariance and grading values are unmeasured.** They are in
-  `config/rf2o.yaml`; README.md Notes says what each does. rf2o grades every
-  match from its own evidence and never against `/odom`, so a slip still
-  corrects the EKF. Set the thresholds from `/scan_odom/quality`'s
-  distributions over the drift suite, then check `scan_degraded` (sim) and
-  `drift_correction` at 0.15 slip, which is the check that slip still gets
-  through.
+- **rf2o's grade thresholds are checked against the drift suite; its
+  variances are guesses.** Both are in `config/rf2o.yaml`; README.md Notes
+  has the distributions. rf2o grades every match from its own evidence and
+  never against `/odom`, so a slip still corrects the EKF. After changing
+  any, re-run `scan_degraded` and `drift_correction` (0.15 slip).
 - **Jazzy: the drift suite and `suite:=ekf` give Humble's
   verdicts on the laptop.** No config key was renamed or removed. Defaults
   that changed or appeared, none of which we set: amcl
