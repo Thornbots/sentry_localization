@@ -1,7 +1,8 @@
 ### rf2o_laser_odometry's covariance and match-confidence parameters.
 ### Topics, frames, fixed_heading and odom_prior_topic stay in
-### localization.launch.py. Every value here is an unmeasured starting
-### guess; README.md Notes says what each one does and what to measure.
+### localization.launch.py. The grade thresholds are checked against the
+### drift suite (2026-09-28); the variances are still guesses. README.md
+### Notes says what each one does.
 rf2o_laser_odometry:
   ros__parameters:
     # Floor variances on /scan_odom (m^2, rad^2). The EKF fuses rf2o's x/y
@@ -17,10 +18,10 @@ rf2o_laser_odometry:
     # failed match advances the pose on /odom's increment instead.
     # Grades are published on /scan_odom/quality either way.
     confidence_enabled: true
-    min_valid_fraction: 0.5      # valid beams below this: degraded
-    fail_valid_fraction: 0.25    # below this: failed
-    max_match_sigma: 0.01        # m, match std-dev on any axis: degraded
-    max_speed: 6.0               # m/s; the chassis tops out near 4
+    min_valid_fraction: 0.5      # valid beams below this: degraded; clean >= 0.64
+    fail_valid_fraction: 0.25    # below this: failed; a 60 deg arc reads 0.17
+    max_match_sigma: 0.01        # m, match std-dev on any axis: degraded; clean <= 0.0015
+    max_speed: 6.0               # m/s; clean <= 4.03, a jerk reads 7-9
     max_extrinsic_age: 0.1       # s; the head's TF trails each scan 0.01 s in sim
     degraded_position_variance: 0.01  # m^2 added along each weak axis
     failed_variance_rate: 0.05   # m^2 per second spent failed
