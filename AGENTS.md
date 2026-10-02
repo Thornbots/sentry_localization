@@ -44,6 +44,10 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
 
 ## Open
 
+- **`/localization/map_odom` has no reader yet.** `mcb_relay`'s 0.02 m
+  std gate rejects every pose it publishes (amcl 0.17-0.30 m, mapping
+  0.05-0.08 m in sim), so wiring it in would stop all relocalizes. The
+  gate, or how the backend covariance counts, is the user's call.
 - **rf2o runs with `fixed_heading: true` and `odom_prior_topic: /odom`**
   (`localization.launch.py`). The first pins its yaw, since the chassis is
   assumed never to rotate; the second seeds each scan match with wheel

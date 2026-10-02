@@ -12,6 +12,12 @@ for how the two fit, and `../ARCC_2026_SENTRY_CONTEXT.md` for game rules.
 - Out: `/localization/odom` in every mode, so `odom_tf_broadcaster` can turn
   it into `odom->root` without knowing the backend.
 - `slam_toolbox` or `amcl` broadcasts `map->odom` directly.
+- Out: `/localization/map_odom` under `slam`/`mapping`/`amcl`:
+  `/localization/odom` moved into `map` by `map_pose_publisher`. Its xy
+  covariance adds the backend's own (`/amcl_pose`, slam_toolbox's `/pose`);
+  until that arrives it reads 1 m^2. Not yet read by `mcb_relay`, whose
+  0.02 m std gate it never passes (2026-10-02, sim: amcl 0.17-0.30 m,
+  mapping 0.05-0.08 m).
 
 `thornbots_pkg/launch/auto.launch.py` includes `launch/localization.launch.py`
 and forwards its args. Standalone, for testing:
@@ -59,9 +65,9 @@ Other args:
 - `odom_frame` (default `odom`).
 - `use_sim_time`: set by `auto.launch.py` from `real_hardware`.
 
-`passthrough_odom_publisher.py` is the only node in this package. The old
-`slam_relocalize_publisher.py` is now `thornbots_pkg/mcb_relay.py`, which
-compares `/localization/odom` with `/odom` instead of looking up TF.
+Nodes: `passthrough_odom_publisher.py` and `map_pose_publisher.py` (math in
+`map_pose_core.py`). `thornbots_pkg/mcb_relay.py` compares
+`/localization/odom` with `/odom`.
 
 ## Testing
 
