@@ -47,6 +47,7 @@ setup(
         'console_scripts': [
             'passthrough_odom_publisher = sentry_localization.passthrough_odom_publisher:main',
             'map_pose_publisher = sentry_localization.map_pose_publisher:main',
+            'map_autosaver = sentry_localization.map_autosaver:main',
         ],
     },
 )

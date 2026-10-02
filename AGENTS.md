@@ -36,14 +36,18 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
 
 ## Scope
 
-- Owns the backends and their tuning; `localization_mode` (`amcl` default /
-  `slam` / `mapping` / `none`) picks the `map->odom` owner, `use_rf2o`
+- Owns the backends and their tuning; `localization_mode` (`mapping` default
+  in `auto.launch.py` / `slam` / `amcl` / `none`) picks the `map->odom` owner, `use_rf2o`
   independently picks the `odom->root` source.
 - No direct hardware dependency; drivers, URDF, and the MCB relay belong to
   `../thornbots_pkg`.
 
 ## Open
 
+- **`save_map` (the `.pgm`) fails about 1 save in 6** in sim: map_saver
+  gives up waiting for `/map` ("Failed to spin map subscription"), with
+  nothing else running (2026-10-02). The last good `.pgm` stays, and
+  `serialize_map` never failed. `map_update_interval` is 5 s.
 - **`/localization/map_odom` has no reader yet.** `mcb_relay`'s 0.02 m
   std gate rejects every pose it publishes (amcl 0.17-0.30 m, mapping
   0.05-0.08 m in sim), so wiring it in would stop all relocalizes. The
