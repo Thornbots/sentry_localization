@@ -23,7 +23,9 @@ Two orthogonal axes control localization:
   (true). This is independent of localization_mode
   -- use_rf2o:=true can be layered on top of any localization_mode, including
   none (the old map-free "ekf mode" configuration).
-Result always published on /localization/odom regardless of backend.
+Result always published on /localization/odom regardless of backend;
+under slam/mapping/amcl, map_pose_publisher also puts it in the map frame
+on /localization/map_odom.
 load_map:=true (default) loads map_file's saved pose graph at startup.
 See README.md's localization_mode/use_rf2o tables/Notes section for detail.
 """
@@ -127,6 +129,12 @@ def generate_launch_description():
         ["'", localization_mode, "' == 'mapping' or ('", localization_mode,
          "' == 'slam' and '", LaunchConfiguration('load_map'), "' == 'true')"]
     )
+    map_selected = PythonExpression(
+        ["'", localization_mode, "' != 'none'"]
+    )
+    backend_pose_topic = PythonExpression(
+        ["'/amcl_pose' if '", localization_mode, "' == 'amcl' else '/pose'"]
+    )
     slam_toolbox_mode_param = PythonExpression(
         ["'mapping' if '", localization_mode, "' == 'mapping' "
          "else 'localization'"]
@@ -204,6 +212,20 @@ def generate_launch_description():
             # constant-velocity guess undershoots every move from rest.
             'odom_prior_topic': '/odom',
             'use_sim_time': use_sim_time,
+        }],
+    )
+
+    # map->root for mcb_relay; covariance adds the backend's own pose
+    # covariance (amcl's /amcl_pose, slam_toolbox's /pose).
+    map_pose_node = Node(
+        package='sentry_localization',
+        executable='map_pose_publisher',
+        name='map_pose_publisher',
+        output='screen',
+        condition=IfCondition(map_selected),
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'backend_pose_topic': backend_pose_topic,
         }],
     )
 
@@ -323,7 +345,7 @@ def generate_launch_description():
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
         use_rf2o_arg,
         passthrough_odom_node, ekf_node,
-        scan_odom_node,
+        scan_odom_node, map_pose_node,
         slam_toolbox_with_map_node, slam_toolbox_no_map_node,
         slam_lifecycle_manager_node,
         map_server_node, amcl_node, amcl_lifecycle_manager_node,
