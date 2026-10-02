@@ -17,6 +17,7 @@ import math
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.time import Time
 from sentry_localization.map_pose_core import compose, rotate_cov_xy
@@ -103,11 +104,13 @@ class MapPosePublisher(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
-    node = MapPosePublisher()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.init(args=args)
+        rclpy.spin(MapPosePublisher())
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

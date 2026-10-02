@@ -89,6 +89,21 @@ def generate_launch_description():
         'slam/mapping until then.'
     )
 
+    autosave_map_arg = DeclareLaunchArgument(
+        'autosave_map', default_value='false',
+        description='mapping only: map_autosaver saves the map every '
+        'map_save_period_s into map_save_dir/<boot time>/.'
+    )
+    map_save_dir_arg = DeclareLaunchArgument(
+        'map_save_dir', default_value='/workspaces/isaac_ros-dev/maps',
+        description='Where map_autosaver writes; the bind-mounted workspace '
+        'outlives the container.'
+    )
+    map_save_period_s_arg = DeclareLaunchArgument(
+        'map_save_period_s', default_value='30.0',
+        description='Seconds between map_autosaver saves.'
+    )
+
     localization_mode_arg = DeclareLaunchArgument(
         'localization_mode', default_value='slam',
         choices=['slam', 'mapping', 'amcl', 'none'],
@@ -229,6 +244,21 @@ def generate_launch_description():
         }],
     )
 
+    map_autosaver_node = Node(
+        package='sentry_localization',
+        executable='map_autosaver',
+        name='map_autosaver',
+        output='screen',
+        condition=IfCondition(PythonExpression(
+            ["'", localization_mode, "' == 'mapping' and '",
+             LaunchConfiguration('autosave_map'), "' == 'true'"])),
+        parameters=[{
+            'save_dir': LaunchConfiguration('map_save_dir'),
+            'period_s': ParameterValue(
+                LaunchConfiguration('map_save_period_s'), value_type=float),
+        }],
+    )
+
     map_server_node = Node(
         package='nav2_map_server',
         executable='map_server',
@@ -343,9 +373,9 @@ def generate_launch_description():
     return LaunchDescription([
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
-        use_rf2o_arg,
+        use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
         passthrough_odom_node, ekf_node,
-        scan_odom_node, map_pose_node,
+        scan_odom_node, map_pose_node, map_autosaver_node,
         slam_toolbox_with_map_node, slam_toolbox_no_map_node,
         slam_lifecycle_manager_node,
         map_server_node, amcl_node, amcl_lifecycle_manager_node,

@@ -36,7 +36,8 @@ ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 | `none` | no map frame | odometry only, usually with `use_rf2o:=true` |
 
 `localization.launch.py` defaults to `slam`; `auto.launch.py` defaults to
-`amcl` (since 2026-08-29).
+`mapping` from a blank map (since 2026-10-02, amcl before), with
+`mcb_relay` still relocalizing from `/localization/odom`.
 
 `use_rf2o` (named `use_ekf` before 2026-09-28) picks the `/localization/odom`
 source, with any mode:
@@ -64,6 +65,12 @@ Other args:
   (`slam`/`mapping` only).
 - `odom_frame` (default `odom`).
 - `use_sim_time`: set by `auto.launch.py` from `real_hardware`.
+- `autosave_map` (default `false`; `auto.launch.py` passes `real_hardware`):
+  under `mapping`, `map_autosaver` saves `map.posegraph/.data` and
+  `map.pgm/.yaml` into `map_save_dir` (`/workspaces/isaac_ros-dev/maps`, the
+  bind-mounted workspace) `/<boot time>/`, alternating every
+  `map_save_period_s` / 2 (30 s). Load one back with
+  `load_map:=true map_file:=<dir>/map`.
 
 Nodes: `passthrough_odom_publisher.py` and `map_pose_publisher.py` (math in
 `map_pose_core.py`). `thornbots_pkg/mcb_relay.py` compares
@@ -268,7 +275,8 @@ Every amcl config spread 0.4-1.3m run to run. `MAX_DELTA_THRESHOLD` (in
 `sim/test/localization/drift_harness.py`) went from 0.30m to 0.40m, ~25% over
 the worst sample, and the scenarios then present passed reliably.
 
-`auto.launch.py` has defaulted to `amcl` since 2026-08-29, so pass
+`auto.launch.py` defaulted to `amcl` from 2026-08-29 and to `mapping` since
+2026-10-02, so pass
 `localization_mode:=slam` to get this configuration.
 
 ### Closed levers
