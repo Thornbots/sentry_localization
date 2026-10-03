@@ -72,8 +72,8 @@ Other args:
   `map_save_period_s` / 2 (30 s). Load one back with
   `load_map:=true map_file:=<dir>/map`.
 
-Nodes: `passthrough_odom_publisher.py` and `map_pose_publisher.py` (math in
-`map_pose_core.py`). `thornbots_pkg/mcb_relay.py` compares
+Nodes: `passthrough_odom_publisher.py`, `map_pose_publisher.py` (math in
+`map_pose_core.py`) and `map_autosaver.py`. `thornbots_pkg/mcb_relay.py` compares
 `/localization/odom` with `/odom`.
 
 ## Testing
