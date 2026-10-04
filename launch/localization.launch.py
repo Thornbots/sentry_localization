@@ -67,8 +67,8 @@ def generate_launch_description():
         'continue from it instead of starting blank. Only '
         'affects localization_mode:=slam/mapping (and only '
         'actually works for those modes against a map_file '
-        'that has a real .posegraph/.data, see map_file '
-        'below -- clean_map does not yet); amcl always loads '
+        'that has a .posegraph/.data, see map_file '
+        'below -- none ships); amcl always loads '
         "map_file's .yaml regardless, and localization_mode:=none "
         'runs no map node at all.'
     )
@@ -79,14 +79,12 @@ def generate_launch_description():
         'slam_toolbox/srv/SerializePoseGraph), amcl reads '
         '<map_file>.yaml (see nav2_map_server). Same basename, '
         'both refer to the same saved map. Default is '
-        'clean_map -- it only has a .yaml/.pgm (map_server-ready, '
-        'so localization_mode:=amcl works against it out of the '
-        'box), NOT a .posegraph/.data, so '
-        'localization_mode:=slam/mapping with load_map:=true '
-        '(both also defaults) will fail to deserialize '
-        'against it until a real mapping run produces one -- '
-        'pass map_file:=<pkg_share>/map/ARCC26 explicitly for '
-        'slam/mapping until then.'
+        'clean_map, in the field frame -- it only has a .yaml/.pgm '
+        '(map_server-ready, so localization_mode:=amcl works '
+        'against it out of the box). No map here has a '
+        '.posegraph/.data, so localization_mode:=slam/mapping with '
+        'load_map:=true fails to deserialize until you pass the '
+        'map_file of one a mapping run saved (autosave_map).'
     )
 
     autosave_map_arg = DeclareLaunchArgument(

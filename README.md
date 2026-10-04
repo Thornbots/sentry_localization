@@ -58,9 +58,11 @@ can move.
 Other args:
 
 - `map_file` (default `map/clean_map`, no extension): `slam_toolbox` reads
-  `<map_file>.posegraph/.data`, `amcl` reads `<map_file>.yaml`. `map/ARCC26`
-  is the real field map and has both. Pass it for `slam`/`mapping`, since
-  `clean_map` has no posegraph.
+  `<map_file>.posegraph/.data`, `amcl` reads `<map_file>.yaml`. The maps
+  here (`clean_map`, `ARCC26`) are images only, in the field frame (REP-105,
+  (0, 0) at the field centre, x toward blue's base). No pose graph ships:
+  for `slam`, or `mapping` with `load_map:=true`, save one from a `mapping`
+  run (`autosave_map`) and pass its `map_file`.
 - `load_map` (default `true`): load the saved pose graph at startup
   (`slam`/`mapping` only).
 - `odom_frame` (default `odom`).

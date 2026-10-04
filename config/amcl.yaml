@@ -34,8 +34,9 @@ amcl:
     update_min_d: 0.1
     update_min_a: 0.05
 
-    # Matches slam_toolbox's map_start_pose (both start from the same
-    # assumed origin).
+    # Matches slam_toolbox's map_start_pose: sim's spawn, the field centre.
+    # root is heading-fixed, so yaw is 0 however the chassis faces. On the
+    # robot the MCB boots at its team's start (red (-4.625, 0)), not here.
     set_initial_pose: true
     initial_pose:
       x: 0.0
