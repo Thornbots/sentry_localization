@@ -66,11 +66,13 @@ Other args:
 - `odom_frame` (default `odom`).
 - `use_sim_time`: set by `auto.launch.py` from `real_hardware`.
 - `autosave_map` (default `false`; `auto.launch.py` passes `real_hardware`):
-  under `mapping`, `map_autosaver` saves `map.posegraph/.data` and
-  `map.pgm/.yaml` into `map_save_dir` (`/workspaces/isaac_ros-dev/maps`, the
-  bind-mounted workspace) `/<boot time>/`, alternating every
-  `map_save_period_s` / 2 (30 s). Load one back with
-  `load_map:=true map_file:=<dir>/map`.
+  under `mapping`, `map_autosaver` saves `map.posegraph/.data`
+  (`serialize_map`) and `map.pgm/.yaml` (written from `/map` itself, as
+  nav2's map_saver would) into `map_save_dir` (`/workspaces/isaac_ros-dev/maps`,
+  the bind-mounted workspace) `/<boot time>/`, every `map_save_period_s`
+  (30 s). Not slam_toolbox's `save_map`: its `map_saver_cli` process must
+  find `/map` within 2 s, and on the sentry mostly didn't. Load one back
+  with `load_map:=true map_file:=<dir>/map`.
 
 Nodes: `passthrough_odom_publisher.py`, `map_pose_publisher.py` (math in
 `map_pose_core.py`) and `map_autosaver.py`. `thornbots_pkg/mcb_relay.py` compares
