@@ -340,3 +340,12 @@ correction and slam_toolbox's correction stack on the same lidar data.
 - Geometry changes invalidate baselines. The 0.1642m `amcl+ekf` result and
   the 0.20m threshold came from a 2m loop (corners ~1.80m from spawn), before
   `4f182e7` widened it to 3m (~2.12m).
+
+
+### Initial field position
+
+`auto.launch.py initial_x:=4.625 initial_y:=0.0` seeds the EKF and AMCL
+at a known team spawn; the default stays `(0, 0)`. `root` remains heading-fixed.
+Scan odometry initializes from the first `/odom` pose so it shares the
+firmware's origin. Starting the EKF at zero with a nonzero firmware pose
+would otherwise make `mcb_relay` immediately reset the firmware to zero.

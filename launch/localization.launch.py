@@ -34,7 +34,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -182,26 +182,34 @@ def generate_launch_description():
         },
     )
 
-    ekf_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        condition=IfCondition(ekf_selected),
-        remappings=[('odometry/filtered', '/localization/odom')],
-        parameters=[
-            ekf_params_file,
-            {
-                'use_sim_time': use_sim_time,
-                'odom_frame': LaunchConfiguration('odom_frame'),
-                'base_link_frame': 'root',
-                # Must match odom_frame, not base_link_frame -- see
-                # config/ekf.yaml's comment on world_frame.
-                'world_frame': LaunchConfiguration('odom_frame'),
-                'publish_tf': False,
-            },
-        ],
-    )
+    def make_ekf(context):
+        node = Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_filter_node',
+            output='screen',
+            condition=IfCondition(ekf_selected),
+            remappings=[('odometry/filtered', '/localization/odom')],
+            parameters=[
+                ekf_params_file,
+                {
+                    'use_sim_time': use_sim_time,
+                    'odom_frame': LaunchConfiguration('odom_frame'),
+                    'base_link_frame': 'root',
+                    # Must match odom_frame, not base_link_frame -- see
+                    # config/ekf.yaml's comment on world_frame.
+                    'world_frame': LaunchConfiguration('odom_frame'),
+                    'publish_tf': False,
+                    'initial_state': [
+                        float(context.launch_configurations['initial_x']),
+                        float(context.launch_configurations['initial_y'])] + [0.0] * 13,
+                },
+            ],
+        )
+
+        return [node]
+
+    ekf_node = OpaqueFunction(function=make_ekf)
 
     # Only used when use_rf2o:=true; nothing else reads /scan_odom.
     scan_odom_node = Node(
@@ -217,7 +225,7 @@ def generate_launch_description():
             'publish_tf': False,
             'base_frame_id': 'root',
             'odom_frame_id': LaunchConfiguration('odom_frame'),
-            'init_pose_from_topic': '',
+            'init_pose_from_topic': '/odom',
             # The chassis never rotates (ekf.yaml); without this rf2o's
             # heading drifts and rotates its x/y.
             'fixed_heading': True,
@@ -281,6 +289,10 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'odom_frame_id': LaunchConfiguration('odom_frame'),
                 'base_frame_id': 'root',
+                'initial_pose.x': ParameterValue(
+                    LaunchConfiguration('initial_x'), value_type=float),
+                'initial_pose.y': ParameterValue(
+                    LaunchConfiguration('initial_y'), value_type=float),
                 'global_frame_id': 'map',
                 'scan_topic': '/scan',
             },
@@ -369,6 +381,10 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'initial_x', default_value='0.0', description='Known initial field X, meters'),
+        DeclareLaunchArgument(
+            'initial_y', default_value='0.0', description='Known initial field Y, meters'),
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
