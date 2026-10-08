@@ -3,9 +3,9 @@
 UDP-only transport profile (no shared-memory transport). passthrough_odom_publisher
 hangs in rcl_node_init -> FastDDS SharedMemTransport::CreateInputChannelResource
 on startup once /dev/shm accumulates many stale fastrtps_* segments from prior
-SIGKILLed runs -- the hang happens before rclpy.spin() even starts, so
+SIGKILLed runs; the hang happens before rclpy.spin() even starts, so
 SIGINT/SIGTERM are never handled. Same fix and same root cause as
-thornbots_pkg/config/fastdds_udp_only.xml (its high-level publishers) --
+thornbots_pkg/config/fastdds_udp_only.xml (its high-level publishers);
 kept as this package's own copy rather than reaching into thornbots_pkg's share
 dir, since it's a small static file and this package has no other dependency
 on thornbots_pkg. Applied to just this node via FASTRTPS_DEFAULT_PROFILES_FILE
