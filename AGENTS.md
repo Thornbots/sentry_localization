@@ -44,11 +44,12 @@ The drift/jerk suite is `ros2 launch sim localization_tests.launch.py`
 
 ## Open
 
-- **Every map is the field frame** (REP-105, (0, 0) at the field centre, x
-  toward blue's base), and so is `/odom` from MCBV3 `rep-105`. The `.pgm`
-  maps were turned 90 deg on branch `rep-105`; no pose graph ships. amcl's
-  `initial_pose` (0, 0) is sim's spawn; on the robot it should be the team's
-  start, or seeded from `/odom`. Not done.
+- Field-frame initialization is implemented:
+  [initial field position](README.md#initial-field-position). Configure the
+  known robot spawn; hardware validation remains open. Saved-map
+  `map_start_pose` is still hard-coded to zero in `localization.launch.py`;
+  carried-map work is in [ROADMAP track H](../ROADMAP.md#h-slam-at-amcls-level).
+  No pose graph ships; see [map inputs](README.md#contract-with-thornbots_pkg).
 - **`/localization/map_odom` has no reader yet.** `mcb_relay`'s 0.02 m
   std gate rejects every pose it publishes (amcl 0.17-0.30 m, mapping
   0.05-0.08 m in sim), so wiring it in would stop all relocalizes. The

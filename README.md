@@ -74,7 +74,10 @@ Other args:
   the bind-mounted workspace) `/<boot time>/`, every `map_save_period_s`
   (30 s). Not slam_toolbox's `save_map`: its `map_saver_cli` process must
   find `/map` within 2 s, and on the sentry mostly didn't. Load one back
-  with `load_map:=true map_file:=<dir>/map`.
+  with `load_map:=true map_file:=<dir>/map`. Saved-map startup currently
+  hard-codes `map_start_pose` to `[0, 0, 0]`; `initial_x`/`initial_y` seed
+  EKF and AMCL only. Loading at a nonzero field spawn still needs
+  [track H's carried-map work](../ROADMAP.md#h-slam-at-amcls-level).
 
 Nodes: `passthrough_odom_publisher.py`, `map_pose_publisher.py` (math in
 `map_pose_core.py`) and `map_autosaver.py`. `thornbots_pkg/mcb_relay.py` compares
