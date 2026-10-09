@@ -31,8 +31,8 @@ std::string to_pgm(const std::vector<int8_t> & data, uint32_t width, uint32_t he
   if (data.size() != static_cast<size_t>(width) * height) {
     throw std::invalid_argument("map data size does not match width x height");
   }
-  const long free_max = std::lround(FREE_THRESH * 100);
-  const long occ_min = std::lround(OCCUPIED_THRESH * 100);
+  const auto free_max = std::lround(FREE_THRESH * 100);
+  const auto occ_min = std::lround(OCCUPIED_THRESH * 100);
   std::string out = "P5\n" + std::to_string(width) + " " + std::to_string(height) + "\n255\n";
   out.reserve(out.size() + data.size());
   for (uint32_t row = 0; row < height; ++row) {

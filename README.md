@@ -150,7 +150,8 @@ one, and the EKF's Mahalanobis gate would lock rf2o out after one jump.
 Every grade is on `/scan_odom/quality` (`diagnostic_msgs/DiagnosticArray`,
 scan stamp) with the signals as values, whether `confidence_enabled` is on
 or not. With it off, the topic reports what would have happened.
-`sim/tools/rf2o_quality.py` records it and prints the distributions.
+`ros2 run sim rf2o_quality` records it and prints the distributions; see
+[quality recording](../sim/README.md#more-on-the-tests).
 
 Over the drift suite (2026-09-28, amcl, `--use-rf2o`, 2418 matches), every
 match in the five clean scenarios graded good bar each stack's first scan.
