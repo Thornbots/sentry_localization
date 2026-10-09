@@ -9,7 +9,7 @@ values. Read that before changing any YAML.
 `README.md` commands are written for a human in a container terminal. You run
 them from the host through `../isaac_ros_common/scripts/dexec.sh` (load the
 `isaac-ros-docker` skill first), e.g.
-`../isaac_ros_common/scripts/dexec.sh -- colcon build --symlink-install --packages-select sentry_localization`.
+`../isaac_ros_common/scripts/dexec.sh -- colcon build --symlink-install --packages-select sentry_localization`. The package is `ament_cmake` (C++ nodes in `src/`); only `launch/` is Python.
 
 Launch through `thornbots_pkg`'s `auto.launch.py`, which includes this package's
 `localization.launch.py`. Don't launch it standalone.

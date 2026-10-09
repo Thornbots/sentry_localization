@@ -79,8 +79,8 @@ Other args:
   EKF and AMCL only. Loading at a nonzero field spawn still needs
   [track H's carried-map work](../ROADMAP.md#h-slam-at-amcls-level).
 
-Nodes: `passthrough_odom_publisher.py`, `map_pose_publisher.py` (math in
-`map_pose_core.py`) and `map_autosaver.py`. `thornbots_pkg/mcb_relay.py` compares
+Nodes (C++, `src/`): `passthrough_odom_publisher`, `map_pose_publisher` (math in
+`map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/mcb_relay.py` compares
 `/localization/odom` with `/odom`.
 
 ## Testing
@@ -91,7 +91,8 @@ It reads these `config/*.yaml` files from `install/`, so rebuild with
 `--symlink-install` after editing them.
 
 `colcon test --packages-select sentry_localization` runs the ament copyright,
-flake8 and pep257 checks.
+flake8 and pep257 checks on `launch/`, plus gtest unit tests for
+`map_pose_core` and `map_image`.
 
 ## Notes
 
