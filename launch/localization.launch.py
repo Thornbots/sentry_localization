@@ -96,8 +96,8 @@ def generate_launch_description():
     localization_mode_arg = DeclareLaunchArgument(
         'localization_mode', default_value='slam',
         choices=['slam', 'mapping', 'amcl', 'none'],
-        description='Selects who owns map->nav_odom -- see the module '
-        'docstring for what each of slam/mapping/amcl/none '
+        description='Selects who owns map->nav_odom -- see the README '
+        'localization_mode table for what each of slam/mapping/amcl/none '
         'actually launches. Independent of use_rf2o, which '
         'estimates the nav_odom->root navigation pose.'
     )
@@ -146,19 +146,15 @@ def generate_launch_description():
     # Map saving/updating (slam_toolbox's use_map_saver, overriding
     # config/slam.yaml's baked-in value) is only ever enabled in mapping
     # mode -- never a side effect of ordinary localization/amcl/ekf
-    # running, per the module docstring.
+    # running.
     map_yaml_file = PythonExpression(
         ["'", LaunchConfiguration('map_file'), "' + '.yaml'"]
     )
 
-    # FASTRTPS_DEFAULT_PROFILES_FILE forces UDP-only transport (no shared
-    # memory) -- this node has been observed hanging in rcl_node_init/
-    # FastDDS SharedMemTransport::CreateInputChannelResource on startup,
-    # before rclpy.spin() even runs, once /dev/shm accumulates many stale
-    # fastrtps_* segments from earlier SIGKILLed runs -- SIGINT/SIGTERM are
-    # never handled because the hang is below the Python signal-check
-    # point. Same fix as thornbots_pkg's pose_translator/odom_tf_broadcaster
-    # (see config/fastdds_no_shm.xml).
+    # UDP-only FastDDS profile (config/fastdds_no_shm.xml): SharedMemTransport
+    # init was seen hanging at node startup when /dev/shm held stale
+    # fastrtps_* segments from SIGKILLed runs. Same fix as thornbots_pkg's
+    # pose_translator/odom_tf_broadcaster.
     passthrough_odom_node = Node(
         package='sentry_localization',
         executable='passthrough_odom_publisher',

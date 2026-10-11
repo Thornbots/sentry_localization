@@ -5,8 +5,8 @@
 ###   odom0 (/localization/ekf_input): vx, vy and fixed yaw. root is heading-fixed,
 ###     so orientation is always identity.
 ###   odom1 (/scan_odom, rf2o_laser_odometry): x, y only, fused continuously.
-### See README.md Notes for source rationale and why yaw is still fused
-### from /odom despite its identity orientation.
+### See README.md Notes for source rationale and why the adapter's fixed
+### identity yaw is fused.
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
