@@ -80,7 +80,7 @@ Other args:
   [track H's carried-map work](../ROADMAP.md#h-slam-at-amcls-level).
 
 Nodes (C++, `src/`): `passthrough_odom_publisher`, `map_pose_publisher` (math in
-`map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/mcb_relay.py` compares
+`map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/src/mcb_relay.cpp` compares
 `/localization/odom` with `/odom`.
 
 ## Testing
@@ -116,8 +116,8 @@ one already rejected.
   re-queries every scan, so the old `head_home_scan_gate` and its
   `/scan_gated` topic are gone.
 - rf2o runs with `fixed_heading: true` and `odom_prior_topic: /odom`. The
-  chassis never turns, so rf2o's accumulated yaw error would only rotate its
-  x/y. Its own velocity prior is the previous scan's motion, so every move
+  `root` is heading-fixed (the chassis yaw is a joint below it), so rf2o's
+  accumulated yaw error would only rotate its x/y. Its own velocity prior is the previous scan's motion, so every move
   from rest started with a prior of "stopped" and came up short: legs of
   x0.86-0.98 at 4 m/s in sim, only in some directions. Seeded with wheel
   odometry's motion between the two scans, every leg reads x1.00 and the
@@ -150,7 +150,8 @@ one, and the EKF's Mahalanobis gate would lock rf2o out after one jump.
 Every grade is on `/scan_odom/quality` (`diagnostic_msgs/DiagnosticArray`,
 scan stamp) with the signals as values, whether `confidence_enabled` is on
 or not. With it off, the topic reports what would have happened.
-`ros2 run sim rf2o_quality` records it and prints the distributions; see
+`ros2 run sim rf2o_quality record OUT` records it and
+`ros2 run sim rf2o_quality summary FILE...` prints the distributions; see
 [quality recording](../sim/README.md#more-on-the-tests).
 
 Over the drift suite (2026-09-28, amcl, `--use-rf2o`, 2418 matches), every
@@ -175,7 +176,7 @@ points on every pyramid level read as zero motion.
 ### config/amcl.yaml
 
 `robot_model_type` is `nav2_amcl::OmniMotionModel`, with its strafe noise
-term, since the chassis is holonomic.
+term, since the chassis is holonomic (it translates without turning).
 
 **alpha1-5: 0.0875** (stock 0.2). On 2026-07-21 all five at 0.05 crashed
 amcl on every startup, before any driving:
@@ -236,9 +237,10 @@ x/y from `/odom` stay out. Wheel slip (the "Bumpy Road" zone, sim's
 both sat 2.02m behind truth. Encoders now supply velocity and `/scan_odom`
 supplies position.
 
-Yaw comes from `/odom`, whose orientation is always identity because the
-chassis never rotates (`ARCC_2026_SENTRY_CONTEXT.md`, "Our Sentry's
-drivetrain"). That identity is the true heading. `robot_localization` rotates
+Yaw comes from `/odom`, whose orientation is always identity because `root`
+is heading-fixed: the physical chassis spins while driving
+(`ARCC_2026_SENTRY_CONTEXT.md`, "Our Sentry's drivetrain"), but that yaw is
+a joint below `root`. That identity is the true `root` heading. `robot_localization` rotates
 body-frame velocity by the filter's yaw, so a wrong yaw integrates velocity in
 the wrong direction. On 2026-07-25, taking yaw from rf2o instead (off by ~pi)
 rotated the estimate 180 degrees: 2.97m mean error against raw odometry's
@@ -255,7 +257,7 @@ from earlier scenarios are candidates. Kept for the isolated gain. Confirm
 ### config/slam.yaml
 
 **minimum_travel_distance: 0.1** (was 0.5). A jerk (slip, bump, collision;
-see `sim/sim/pose_emulator.py`'s `trigger_jerk`) is invisible to wheel
+see `sim/src/pose_emulator.cpp`'s `trigger_jerk`) is invisible to wheel
 odometry, so a slow or stopped robot never travelled 0.5m, slam_toolbox never
 matched a new scan, and `map->odom` froze. Live check: a stationary
 `trigger_jerk` got no update in 30s at 0.5, while `/cmd_vel` motion updated
@@ -280,8 +282,8 @@ matches on the fast corners; 0.1 measured 0.89m.
 
 At the current 0.15 slip, three full-suite runs gave `drift_correction`
 0.3125/0.3261/0.3224m and `drift_correction_obstacle` 0.3150/0.3002/0.3194m.
-Every amcl config spread 0.4-1.3m run to run. `MAX_DELTA_THRESHOLD` (in
-`sim/test/localization/drift_harness.py`) went from 0.30m to 0.40m, ~25% over
+Every amcl config spread 0.4-1.3m run to run. `kMaxDelta` (in
+`sim/test/localization/localization_suite.cpp`) went from 0.30m to 0.40m, ~25% over
 the worst sample, and the scenarios then present passed reliably.
 
 `auto.launch.py` defaulted to `amcl` from 2026-08-29 and to `mapping` since
@@ -306,7 +308,7 @@ held.
 
 ### Why the map-based drift scenarios are hard
 
-`pose_emulator.py` adds only `(1 - slip_ratio)` of each true step to `/odom`,
+`sim/src/pose_emulator.cpp` adds only `(1 - slip_ratio)` of each true step to `/odom`,
 so `odom_error(t) = slip_ratio * |true_pos(t) - true_pos(t0)|`, measured from
 the start point, not along the path. The loop's corners reach 2.12m from
 spawn, so at 0.25 slip the correction must move ~0.53m, over 2.5x the 0.20m
