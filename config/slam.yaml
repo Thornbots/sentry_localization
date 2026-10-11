@@ -49,7 +49,7 @@ slam_toolbox:
     # minimum_travel_distance: 0.1 (was 0.5) -- 0.5m let sudden position
     # jerks (wheel slip, collisions) go unnoticed by slam_toolbox when the
     # robot was stationary/slow, since wheel odometry can't see them.
-    # minimum_travel_heading is irrelevant (chassis never rotates heading)
+    # minimum_travel_heading is irrelevant (root is heading-fixed)
     # but left small, not 0. See README.md Notes for the verification.
     minimum_travel_distance: 0.1
     minimum_travel_heading: 0.05

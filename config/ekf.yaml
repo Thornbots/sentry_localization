@@ -2,9 +2,9 @@
 ### numbers are starting guesses, not measured/validated.
 ###
 ### Fuses two odometry-shaped sources into odom->root:
-###   odom0 (/odom, wheel odometry): x, y, vx, vy only. Chassis is
-###     holonomic with fixed heading, so orientation is always identity.
-###   odom1 (/scan_odom, rf2o_laser_odometry): x, y, yaw, fused continuously.
+###   odom0 (/odom, wheel odometry): vx, vy and yaw. root is heading-fixed,
+###     so orientation is always identity.
+###   odom1 (/scan_odom, rf2o_laser_odometry): x, y only, fused continuously.
 ### See README.md Notes for source rationale and why yaw is still fused
 ### from /odom despite its identity orientation.
 ekf_filter_node:
@@ -74,8 +74,8 @@ ekf_filter_node:
     odom1_differential: false
     odom1_relative: false
 
-    # Yaw process noise kept very low/tightly trusted: the chassis heading
-    # is physically fixed (holonomic drivetrain that only translates, see
+    # Yaw process noise kept very low/tightly trusted: the heading
+    # of root is fixed by construction (chassis yaw is a joint below it, see
     # ARCC_2026_SENTRY_CONTEXT.md), so the filter should barely let yaw
     # move at all regardless of what either odom source reports. x/y get
     # the library's normal defaults as a first pass -- not yet tuned
