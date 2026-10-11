@@ -9,9 +9,11 @@ for how the two fit, and `../ARCC_2026_SENTRY_CONTEXT.md` for game rules.
 
 - In: `/odom` (raw wheel odometry from `pose_translator`) and `/scan` (lidar
   driver or `sim`).
-- Out: `/localization/odom` in every mode, so `odom_tf_broadcaster` can turn
-  it into `odom->root` without knowing the backend.
-- `slam_toolbox` or `amcl` broadcasts `map->odom` directly.
+- Out: `/localization/odom` in `nav_odom` in every mode. The broadcaster
+  compares it with same-stamp raw `/odom` to publish translation-only
+  `nav_odom->odom`; raw `odom->root` remains independent.
+- `slam_toolbox` or `amcl` broadcasts `map->nav_odom` directly. Frame roles
+  and deviations are owned by [thornbots_pkg](../thornbots_pkg/README.md#pose_translator).
 - Out: `/localization/map_odom` under `slam`/`mapping`/`amcl`:
   `/localization/odom` moved into `map` by `map_pose_publisher`. Its xy
   covariance adds the backend's own (`/amcl_pose`, slam_toolbox's `/pose`);
@@ -26,7 +28,7 @@ and forwards its args. Standalone, for testing:
 ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
 ```
 
-`localization_mode` picks the `map->odom` owner:
+`localization_mode` picks the `map->nav_odom` owner:
 
 | Value | Owner | Use |
 | --- | --- | --- |
@@ -44,8 +46,8 @@ source, with any mode:
 
 | Value | Source |
 | --- | --- |
-| `false` | `passthrough_odom_publisher`, relays `/odom` unchanged |
-| `true` | `robot_localization`'s `ekf_node`, fusing `/odom` and rf2o's `/scan_odom` |
+| `false` | `passthrough_odom_publisher`, raw pose in identical navigation axes, labeled `nav_odom` |
+| `true` | `ekf_input_publisher` supplies root velocity/fixed heading; `ekf_node` fuses these with rf2o's `/scan_odom` position |
 
 `true` is the default in both this file and `auto.launch.py` (since
 2026-09-20), so the stack runs rf2o + the EKF unless you pass
@@ -79,9 +81,9 @@ Other args:
   EKF and AMCL only. Loading at a nonzero field spawn still needs
   [track H's carried-map work](../ROADMAP.md#h-slam-at-amcls-level).
 
-Nodes (C++, `src/`): `passthrough_odom_publisher`, `map_pose_publisher` (math in
+Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_pose_publisher` (math in
 `map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/src/mcb_relay.cpp` compares
-`/localization/odom` with `/odom`.
+`/localization/odom` with raw `/odom` plus its last sent navigation offset.
 
 ## Testing
 
@@ -110,7 +112,7 @@ one already rejected.
   nodes, each activated by a `lifecycle_manager` with `autostart: true`:
   `lifecycle_manager_localization` for amcl, `lifecycle_manager_slam` for
   slam_toolbox. Without it slam_toolbox sits unconfigured and never
-  publishes `map->odom`.
+  publishes `map->nav_odom`.
 - rf2o used to cache its lidar->root transform from the first scan, which
   assumes a rigid mount. The fork (built by `isaac_ros_common`'s Dockerfile)
   re-queries every scan, so the old `head_home_scan_gate` and its
@@ -226,7 +228,9 @@ so any `map->odom` movement was amcl's.
 
 Covariance and process noise are unmeasured starting guesses.
 
-- `odom0` (`/odom`): yaw, vx, vy.
+- `odom0` (`/localization/ekf_input`): fixed root heading, vx, vy. The adapter
+  preserves `/odom` capture stamps and root-frame twist, discards raw x/y,
+  and defines identity heading directly in navigation axes. It requires no TF.
 - `odom1` (`/scan_odom`, rf2o): x, y. It used to be gated to head-home
   windows; since the rf2o fix it streams continuously.
 
@@ -237,7 +241,7 @@ x/y from `/odom` stay out. Wheel slip (the "Bumpy Road" zone, sim's
 both sat 2.02m behind truth. Encoders now supply velocity and `/scan_odom`
 supplies position.
 
-Yaw comes from `/odom`, whose orientation is always identity because `root`
+The heading measurement is identity because `root`
 is heading-fixed: the physical chassis spins while driving
 (`ARCC_2026_SENTRY_CONTEXT.md`, "Our Sentry's drivetrain"), but that yaw is
 a joint below `root`. That identity is the true `root` heading. `robot_localization` rotates
@@ -245,6 +249,13 @@ body-frame velocity by the filter's yaw, so a wrong yaw integrates velocity in
 the wrong direction. On 2026-07-25, taking yaw from rf2o instead (off by ~pi)
 rotated the estimate 180 degrees: 2.97m mean error against raw odometry's
 0.22m.
+
+Directly fusing `/odom` yaw after separating `nav_odom` would transform that
+measurement through `nav_odom->odom`, computed from this filter's output.
+The adapter removes that circular dependency: only fixed navigation heading
+and root-frame twist enter `odom0`. `nav_odom` keeps raw odometry's axes;
+the correction TF changes translation only, matching the MCB navigation offset.
+Historical measurements below use the frame names present during those runs.
 
 `dynamic_process_noise_covariance: true`, with x/y `process_noise_covariance`
 raised 0.05 to 0.08 (`8a719ab`), scales process noise with estimated

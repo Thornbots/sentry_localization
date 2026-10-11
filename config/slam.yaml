@@ -10,10 +10,9 @@ slam_toolbox:
     ceres_loss_function: None
 
     # ROS Parameters
-    # base_frame/odom_frame match the sentry URDF's root link and the
-    # OdometryPublisher plugin's frames (see sim/urdf/sentry.urdf.xacro),
-    # so this works unmodified against the sim package's odom->root TF.
-    odom_frame: odom
+    # root is heading-fixed; nav_odom is the navigation reference.
+    # The launch forwards the owning frame names from thornbots_pkg.
+    odom_frame: nav_odom
     map_frame: map
     base_frame: root
     scan_topic: /scan

@@ -14,8 +14,8 @@
 
 // Publish /localization/odom moved into the map frame, on /localization/map_odom.
 //
-// Pose: map->odom (TF, at the input's stamp, else the latest) composed with
-// the input's odom->root. Stamp and twist (child frame) are the input's.
+// Pose: map->nav_odom (TF, at the input's stamp, else latest) composed with
+// the input navigation pose. Stamp and twist (child frame) are the input's.
 // xy covariance: the input's, rotated into map, plus the latest xy
 // covariance on backend_pose_topic (/amcl_pose or slam_toolbox's /pose).
 // Not launched under localization_mode:=none, which has no map frame.

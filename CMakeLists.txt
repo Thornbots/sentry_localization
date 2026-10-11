@@ -25,6 +25,9 @@ target_include_directories(${PROJECT_NAME}_core PUBLIC
 
 add_executable(passthrough_odom_publisher src/passthrough_odom_publisher.cpp)
 ament_target_dependencies(passthrough_odom_publisher nav_msgs rclcpp)
+add_executable(ekf_input_publisher src/ekf_input_publisher.cpp)
+target_include_directories(ekf_input_publisher PRIVATE include)
+ament_target_dependencies(ekf_input_publisher nav_msgs rclcpp)
 
 add_executable(map_pose_publisher src/map_pose_publisher.cpp)
 target_link_libraries(map_pose_publisher ${PROJECT_NAME}_core)
@@ -39,7 +42,7 @@ install(TARGETS ${PROJECT_NAME}_core
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
-install(TARGETS passthrough_odom_publisher map_pose_publisher map_autosaver
+install(TARGETS passthrough_odom_publisher ekf_input_publisher map_pose_publisher map_autosaver
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config map DESTINATION share/${PROJECT_NAME})
 
@@ -55,6 +58,9 @@ if(BUILD_TESTING)
   target_link_libraries(test_map_pose_core ${PROJECT_NAME}_core)
   ament_add_gtest(test_map_image test/test_map_image.cpp)
   target_link_libraries(test_map_image ${PROJECT_NAME}_core)
+  ament_add_gtest(test_ekf_input test/test_ekf_input.cpp)
+  target_include_directories(test_ekf_input PRIVATE include)
+  ament_target_dependencies(test_ekf_input nav_msgs)
 endif()
 
 ament_package()

@@ -1,8 +1,8 @@
 ### First-pass EKF config -- not final tuning; covariance/process-noise
 ### numbers are starting guesses, not measured/validated.
 ###
-### Fuses two odometry-shaped sources into odom->root:
-###   odom0 (/odom, wheel odometry): vx, vy and yaw. root is heading-fixed,
+### Estimates the navigation pose in nav_odom; thornbots owns correction TF.
+###   odom0 (/localization/ekf_input): vx, vy and fixed yaw. root is heading-fixed,
 ###     so orientation is always identity.
 ###   odom1 (/scan_odom, rf2o_laser_odometry): x, y only, fused continuously.
 ### See README.md Notes for source rationale and why yaw is still fused
@@ -16,17 +16,13 @@ ekf_filter_node:
     # This package's base frame is "root" (not robot_localization's
     # default "base_link"), matching base_frame_id/base_frame convention
     # used throughout the rest of the pipeline (rf2o, slam_toolbox).
-    odom_frame: odom
+    odom_frame: nav_odom
     base_link_frame: root
-    # world_frame must equal odom_frame (not base_link_frame) for the
-    # standard "fuse continuous odometry, publish odom->base_link TF"
-    # case -- setting world_frame == base_link_frame is only for the
-    # global/map-frame fusion case (robot_localization docs), and
-    # silently disables odom->root TF publishing entirely if set wrong,
-    # which is why this is called out explicitly.
-    world_frame: odom
+    # The filter estimates navigation pose; thornbots publishes translation-only
+    # navigation alignment and independently owns raw odom->root TF.
+    world_frame: nav_odom
 
-    publish_tf: true
+    publish_tf: false
 
     # Scales process_noise_covariance by the filter's own current velocity
     # estimate -- more injected noise while moving fast, less near zero
@@ -37,15 +33,14 @@ ekf_filter_node:
     # Notes for the measured numbers and the isolated-vs-suite discrepancy.
     dynamic_process_noise_covariance: true
 
-    odom0: /odom
+    odom0: /localization/ekf_input
     # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
     #
     # VELOCITY ONLY -- x/y deliberately NOT fused from this source (wheel
     # slip would otherwise get baked into absolute position irrecoverably).
-    # Yaw IS fused despite /odom's orientation always being identity --
-    # that identity is the true, physically-guaranteed heading, and a
-    # wrong yaw here misdirects velocity integration. See README.md Notes
-    # for the measured drift/error numbers behind both choices.
+    # The adapter defines identity root heading in navigation axes, without
+    # transforming /odom yaw through this filter's own output TF. Raw x/y
+    # are absent from that input. See README.md for the frame contract.
     odom0_config: [false, false, false,
                    false, false, true,
                    true,  true,  false,
