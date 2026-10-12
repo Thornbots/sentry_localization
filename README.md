@@ -67,7 +67,7 @@ Other args:
   run (`autosave_map`) and pass its `map_file`.
 - `load_map` (default `true`): load the saved pose graph at startup
   (`slam`/`mapping` only).
-- `odom_frame` (default `odom`).
+- `odom_frame` (default `nav_odom`).
 - `use_sim_time`: set by `auto.launch.py` from `real_hardware`.
 - `autosave_map` (default `false`; `auto.launch.py` passes `real_hardware`):
   under `mapping`, `map_autosaver` saves `map.posegraph/.data`
