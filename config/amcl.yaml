@@ -6,7 +6,7 @@ amcl:
     # odom_frame launch arg; the values below are just this file's own
     # standalone defaults (e.g. for running amcl directly, outside the
     # launch file).
-    odom_frame_id: odom
+    odom_frame_id: nav_odom
     base_frame_id: root
     global_frame_id: map
     scan_topic: /scan
@@ -72,7 +72,7 @@ amcl:
     beam_skip_error_threshold: 0.9
     beam_skip_threshold: 0.3
     # min/max_particles: 1000/3000 (was 500/2000), a moderate step to damp
-    # map->odom wobble without exceeding max_beams' real-time budget --
+    # map->nav_odom wobble without exceeding max_beams' real-time budget --
     # see README.md Notes for the full tuning history.
     min_particles: 1000
     max_particles: 3000

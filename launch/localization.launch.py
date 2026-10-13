@@ -13,21 +13,12 @@
 # limitations under the License.
 
 """
-Launch sentry_localization's map/odom localization stack.
+Launch map->nav_odom backends and the navigation pose estimator.
 
-Two orthogonal axes control localization:
-- localization_mode (slam/mapping/amcl/none) picks who owns map->odom --
-  slam_toolbox, amcl, or nobody (none). This is the map layer.
-- use_rf2o (bool, default true) picks who owns odom->root: raw passthrough
-  of /odom (false), or rf2o's /scan_odom fused with /odom by ekf_node
-  (true). This is independent of localization_mode
-  -- use_rf2o:=true can be layered on top of any localization_mode, including
-  none (the old map-free "ekf mode" configuration).
-Result always published on /localization/odom regardless of backend;
-under slam/mapping/amcl, map_pose_publisher also puts it in the map frame
-on /localization/map_odom.
-load_map:=true (default) loads map_file's saved pose graph at startup.
-See README.md's localization_mode/use_rf2o tables/Notes section for detail.
+use_rf2o selects EKF fusion or raw-pose passthrough in aligned navigation axes.
+Raw odom->root and translation-only nav_odom->odom TF belong to thornbots_pkg.
+The EKF input adapter pins root heading without reading its output TF.
+See README.md for the backend table, frame contract and map loading.
 """
 import os
 
@@ -56,9 +47,9 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
 
     odom_frame_arg = DeclareLaunchArgument(
-        'odom_frame', default_value='odom',
+        'odom_frame', default_value='nav_odom',
         description='Frame slam_toolbox/amcl/ekf_node treat as their '
-        'drift-free reference, parent of base_frame.'
+        'navigation reference, with axes aligned to raw odom.'
     )
 
     load_map_arg = DeclareLaunchArgument(
@@ -105,14 +96,14 @@ def generate_launch_description():
     localization_mode_arg = DeclareLaunchArgument(
         'localization_mode', default_value='slam',
         choices=['slam', 'mapping', 'amcl', 'none'],
-        description='Selects who owns map->odom -- see the module '
-        'docstring for what each of slam/mapping/amcl/none '
+        description='Selects who owns map->nav_odom -- see the README '
+        'localization_mode table for what each of slam/mapping/amcl/none '
         'actually launches. Independent of use_rf2o, which '
-        'owns odom->root.'
+        'estimates the nav_odom->root navigation pose.'
     )
     use_rf2o_arg = DeclareLaunchArgument(
         'use_rf2o', default_value='true',
-        description='Whether rf2o scan odometry is fused into odom->root '
+        description='Whether rf2o informs the nav_odom->root navigation pose '
         '(rf2o_laser_odometry_node, fused by ekf_node) instead of '
         'passing /odom through raw. Independent of localization_mode -- '
         'layers on top of slam/mapping/amcl/none.'
@@ -155,31 +146,40 @@ def generate_launch_description():
     # Map saving/updating (slam_toolbox's use_map_saver, overriding
     # config/slam.yaml's baked-in value) is only ever enabled in mapping
     # mode -- never a side effect of ordinary localization/amcl/ekf
-    # running, per the module docstring.
+    # running.
     map_yaml_file = PythonExpression(
         ["'", LaunchConfiguration('map_file'), "' + '.yaml'"]
     )
 
-    # FASTRTPS_DEFAULT_PROFILES_FILE forces UDP-only transport (no shared
-    # memory) -- this node has been observed hanging in rcl_node_init/
-    # FastDDS SharedMemTransport::CreateInputChannelResource on startup,
-    # before rclpy.spin() even runs, once /dev/shm accumulates many stale
-    # fastrtps_* segments from earlier SIGKILLed runs -- SIGINT/SIGTERM are
-    # never handled because the hang is below the Python signal-check
-    # point. Same fix as thornbots_pkg's pose_translator/odom_tf_broadcaster
-    # (see config/fastdds_no_shm.xml).
+    # UDP-only FastDDS profile (config/fastdds_no_shm.xml): SharedMemTransport
+    # init was seen hanging at node startup when /dev/shm held stale
+    # fastrtps_* segments from SIGKILLed runs. Same fix as thornbots_pkg's
+    # pose_translator/odom_tf_broadcaster.
     passthrough_odom_node = Node(
         package='sentry_localization',
         executable='passthrough_odom_publisher',
         name='passthrough_odom_publisher',
         output='screen',
         condition=IfCondition(passthrough_selected),
-        parameters=[{'use_sim_time': use_sim_time}],
+        parameters=[{'use_sim_time': use_sim_time,
+                     'navigation_frame': LaunchConfiguration('odom_frame')}],
         additional_env={
             'FASTRTPS_DEFAULT_PROFILES_FILE': os.path.join(
                 pkg_share, 'config', 'fastdds_no_shm.xml'
             )
         },
+    )
+
+    ekf_input_node = Node(
+        package='sentry_localization',
+        executable='ekf_input_publisher',
+        name='ekf_input_publisher',
+        output='screen',
+        condition=IfCondition(ekf_selected),
+        parameters=[{'use_sim_time': use_sim_time,
+                     'navigation_frame': LaunchConfiguration('odom_frame')}],
+        additional_env={'FASTRTPS_DEFAULT_PROFILES_FILE': os.path.join(
+            pkg_share, 'config', 'fastdds_no_shm.xml')},
     )
 
     def make_ekf(context):
@@ -388,7 +388,7 @@ def generate_launch_description():
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
-        passthrough_odom_node, ekf_node,
+        passthrough_odom_node, ekf_input_node, ekf_node,
         scan_odom_node, map_pose_node, map_autosaver_node,
         slam_toolbox_with_map_node, slam_toolbox_no_map_node,
         slam_lifecycle_manager_node,
