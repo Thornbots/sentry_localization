@@ -3,7 +3,7 @@
 Localization backends (SLAM, AMCL, EKF) for the Thornbots ARC 2026 Sentry.
 It consumes `/odom` and `/scan` and has no hardware dependency; drivers and
 the robot description are in `thornbots_pkg`. See `thornbots_pkg/README.md`
-for how the two fit, and `../ARCC_2026_SENTRY_CONTEXT.md` for game rules.
+for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
 
 ## Contract with thornbots_pkg
 
@@ -79,7 +79,7 @@ Other args:
   with `load_map:=true map_file:=<dir>/map`. Saved-map startup currently
   hard-codes `map_start_pose` to `[0, 0, 0]`; `initial_x`/`initial_y` seed
   EKF and AMCL only. Loading at a nonzero field spawn still needs
-  [track H's carried-map work](../ROADMAP.md#h-slam-at-amcls-level).
+  [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
 
 Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_pose_publisher` (math in
 `map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/src/mcb_relay.cpp` compares
