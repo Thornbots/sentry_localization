@@ -183,9 +183,10 @@ def generate_launch_description():
     )
 
     def make_ekf(context):
+        gated = context.launch_configurations['lockstep_inputs'] == 'true'
         node = Node(
-            package='robot_localization',
-            executable='ekf_node',
+            package='sentry_localization' if gated else 'robot_localization',
+            executable='lockstep_ekf' if gated else 'ekf_node',
             name='ekf_filter_node',
             output='screen',
             condition=IfCondition(ekf_selected),
@@ -232,6 +233,11 @@ def generate_launch_description():
             # Seed each scan match with wheel odometry's motion; rf2o's own
             # constant-velocity guess undershoots every move from rest.
             'odom_prior_topic': '/odom',
+            'strict_capture': LaunchConfiguration('lockstep_inputs'),
+            'minimum_scan_stamp_s': 0.1,
+            'consumed_topic': PythonExpression([
+                "'/sim/lockstep/scan_consumed' if '", LaunchConfiguration('lockstep_inputs'),
+                "' == 'true' else ''"]),
             'use_sim_time': use_sim_time,
         }],
     )
@@ -383,6 +389,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'initial_x', default_value='0.0', description='Known initial field X, meters'),
+        DeclareLaunchArgument('lockstep_inputs', default_value='false',
+                              description='Experimental capture-ordered simulation inputs'),
         DeclareLaunchArgument(
             'initial_y', default_value='0.0', description='Known initial field Y, meters'),
         use_sim_time_arg,
