@@ -11,7 +11,13 @@
   <test_depend>ament_cmake_flake8</test_depend>
   <test_depend>ament_cmake_pep257</test_depend>
   <test_depend>ament_cmake_gtest</test_depend>
-  <exec_depend>robot_localization</exec_depend>
+  <depend>robot_localization</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>diagnostic_updater</depend>
+  <depend>eigen</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_geometry_msgs</depend>
   <exec_depend>rf2o_laser_odometry</exec_depend>
   <exec_depend>nav2_amcl</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
