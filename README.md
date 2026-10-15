@@ -109,6 +109,13 @@ scan fixture. Scan receipts distinguish published odometry from initialization
 or a failed match with no output. The adapter waits for the paired scan
 odometry message when publication was reported; arrival order cannot discard it.
 
+`/sim/lockstep/ekf_output` reports each logical update with `published` or
+`no_output`, plus `output_stamp_ns` and `raw_stamp_ns` values. The relay pairs
+that receipt with the captured filtered odometry and raw-input watermark before
+making its decision at the logical update tick. The UART barrier acknowledges
+the resulting simulator command before physics advances. The embedded correction
+keeps its future application stamp; the simulator envelope carries decision time.
+
 `ros2 run sim lockstep_ekf_suite` checks the real adapter's watermark hold,
 carried output stamp and missed-tick rejection without Gazebo. Full profile
 acceptance is tracked in the

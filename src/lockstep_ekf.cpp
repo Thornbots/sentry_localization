@@ -60,6 +60,8 @@ public:
     if (period_ns_ < 1000000) {throw std::invalid_argument("EKF frequency exceeds physics rate");}
     input_ack_ = create_publisher<std_msgs::msg::Header>("/sim/lockstep/ekf_input", 100);
     update_ack_ = create_publisher<std_msgs::msg::Header>("/sim/lockstep/ekf", 100);
+    output_receipt_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
+      "/sim/lockstep/ekf_output", 100);
     for (size_t index = 0; index < 2; ++index) {
       const auto prefix = "odom" + std::to_string(index);
       topics_[index] = get_parameter(prefix).as_string();
@@ -135,12 +137,42 @@ private:
     const auto tick = (logical + 999999) / 1000000 * 1000000;
     const auto current = now().nanoseconds();
     if (current < tick) {return;}
-    if (current > tick) {throw std::runtime_error("lockstep timeout: EKF missed exact update tick");}
+    if (current > tick) {
+      throw std::runtime_error("lockstep timeout: EKF missed exact update tick " +
+        std::to_string(tick) + " at clock " + std::to_string(current) +
+        "; input watermark " + std::to_string(watermark_ns_) +
+        "; scan watermark " + std::to_string(scan_watermark_ns_) +
+        "; queued inputs " + std::to_string(inputs_.size()) +
+        "; pending receipts " + std::to_string(receipts_.size()));
+    }
     // Scan processing requires carried raw odometry after the scan. A fixed
     // 14 ms budget keeps current-scan arrival out of the filter's input set.
     const auto scan_cutoff = tick - 14000000;
     const auto expected_scan = scan_cutoff / 100000000 * 100000000;
     if (watermark_ns_ < tick || (expected_scan >= 100000000 && scan_watermark_ns_ < expected_scan)) {
+      const auto wall = std::chrono::steady_clock::now();
+      if (waiting_tick_ns_ != tick) {
+        waiting_tick_ns_ = tick;
+        waiting_since_ = wall;
+        wait_reported_ = false;
+      }
+      if (!wait_reported_ && wall - waiting_since_ >= std::chrono::milliseconds(250)) {
+        std::string queued;
+        for (const auto & input : inputs_) {
+          queued += " " + std::to_string(input.first.second) + ":" +
+            std::to_string(input.first.first);
+        }
+        std::string receipts;
+        for (const auto & receipt : receipts_) {
+          receipts += " " + std::to_string(receipt.first) +
+            (receipt.second ? ":published" : ":no_output");
+        }
+        RCLCPP_WARN(get_logger(), "EKF input hold at %ld ns: clock %ld, MCB watermark %ld, "
+          "scan watermark %ld, expected scan >= %ld; queued%s; receipts%s",
+          tick, current, watermark_ns_, scan_watermark_ns_, expected_scan,
+          queued.c_str(), receipts.c_str());
+        wait_reported_ = true;
+      }
       return;
     }
     for (auto input = inputs_.begin(); input != inputs_.end();) {
@@ -148,9 +180,24 @@ private:
       if (stamp > tick) {break;}
       if (index == 1 && stamp > scan_cutoff) {++input; continue;}
       odometryCallback(input->second, topics_[index], pose_data_[index], twist_data_[index]);
+      if (index == 0) {raw_stamp_ns_ = stamp;}
       input = inputs_.erase(input);
     }
+    const auto previous_output = last_published_stamp_;
     periodicUpdate();
+    diagnostic_msgs::msg::DiagnosticArray receipt;
+    receipt.header.stamp = rclcpp::Time(tick, RCL_ROS_TIME);
+    diagnostic_msgs::msg::DiagnosticStatus status;
+    status.name = "lockstep_ekf";
+    status.message = last_published_stamp_ != previous_output ? "published" : "no_output";
+    diagnostic_msgs::msg::KeyValue output_stamp, raw_stamp;
+    output_stamp.key = "output_stamp_ns";
+    output_stamp.value = std::to_string(last_published_stamp_.nanoseconds());
+    raw_stamp.key = "raw_stamp_ns";
+    raw_stamp.value = std::to_string(raw_stamp_ns_);
+    status.values = {output_stamp, raw_stamp};
+    receipt.status.push_back(status);
+    output_receipt_->publish(receipt);
     std_msgs::msg::Header ack;
     ack.stamp = rclcpp::Time(tick, RCL_ROS_TIME);
     update_ack_->publish(ack);
@@ -162,6 +209,11 @@ private:
   std::map<std::pair<int64_t, size_t>, nav_msgs::msg::Odometry::SharedPtr> inputs_;
   std::map<int64_t, bool> receipts_;
   int64_t period_ns_ = 33333333, next_index_ = 1, watermark_ns_ = 0, scan_watermark_ns_ = 0;
+  int64_t waiting_tick_ns_ = -1;
+  std::chrono::steady_clock::time_point waiting_since_;
+  bool wait_reported_ = false;
+  int64_t raw_stamp_ns_ = 0;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr output_receipt_;
   rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr input_ack_, update_ack_;
   std::vector<rclcpp::SubscriptionBase::SharedPtr> subs_;
   rclcpp::TimerBase::SharedPtr retry_;
