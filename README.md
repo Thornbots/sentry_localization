@@ -113,6 +113,11 @@ one already rejected.
   `lifecycle_manager_localization` for amcl, `lifecycle_manager_slam` for
   slam_toolbox. Without it slam_toolbox sits unconfigured and never
   publishes `map->nav_odom`.
+- Each backend and its lifecycle manager share the C++ `localization_backend`
+  process, constructed locally without a `load_node` service call. Local service endpoints share a DDS participant, so a configure
+  response cannot race discovery of a remote client's response reader. Each
+  component has its own executor; the manager can wait for a transition while
+  the backend services it. This uses the existing transition and bond deadlines.
 - rf2o used to cache its lidar->root transform from the first scan, which
   assumes a rigid mount. The fork (built by `isaac_ros_common`'s Dockerfile)
   re-queries every scan, so the old `head_home_scan_gate` and its
@@ -350,9 +355,10 @@ correction and slam_toolbox's correction stack on the same lidar data.
 - Host load corrupts results. One batch ran beside ~18 agent sessions (load
   4-8 on 22 CPUs) and its `--use-rf2o` numbers were unusable. Check `uptime`
   and `ps aux --sort=-%cpu` before trusting a number near threshold.
-- Bringup races look like config failures: `amcl/get_state`
-  `async_send_request failed`, or `map_server` "IS DOWN after not receiving
-  a heartbeat for 4000 ms" cascading into a crash. Rerun on a quiet host.
+- Bringup failures are distinct from tuning results. Check lifecycle activation
+  and each link of `map -> nav_odom -> odom -> root` before interpreting an
+  absent `map->root` as missing raw odometry. A discarded startup is not an
+  accuracy sample.
 - The metric is a max over a 45s drive, so one transient correction sets it.
   No process-noise knob can change that.
 - Geometry changes invalidate baselines. The 0.1642m `amcl+ekf` result and
