@@ -10,9 +10,17 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
+find_package(diagnostic_updater REQUIRED)
+find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(robot_localization REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(slam_toolbox REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -28,6 +36,10 @@ ament_target_dependencies(passthrough_odom_publisher nav_msgs rclcpp)
 add_executable(ekf_input_publisher src/ekf_input_publisher.cpp)
 target_include_directories(ekf_input_publisher PRIVATE include)
 ament_target_dependencies(ekf_input_publisher nav_msgs rclcpp)
+add_executable(lockstep_ekf src/lockstep_ekf.cpp)
+target_link_libraries(lockstep_ekf Eigen3::Eigen ${robot_localization_LIBRARIES})
+ament_target_dependencies(lockstep_ekf diagnostic_msgs diagnostic_updater nav_msgs rclcpp
+  robot_localization sensor_msgs std_msgs std_srvs tf2 tf2_geometry_msgs tf2_ros)
 
 add_executable(map_pose_publisher src/map_pose_publisher.cpp)
 target_link_libraries(map_pose_publisher ${PROJECT_NAME}_core)
@@ -42,7 +54,7 @@ install(TARGETS ${PROJECT_NAME}_core
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
-install(TARGETS passthrough_odom_publisher ekf_input_publisher map_pose_publisher map_autosaver
+install(TARGETS passthrough_odom_publisher ekf_input_publisher lockstep_ekf map_pose_publisher map_autosaver
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config map DESTINATION share/${PROJECT_NAME})
 

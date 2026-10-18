@@ -87,6 +87,40 @@ Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_p
 
 ## Testing
 
+`localization.launch.py lockstep_inputs:=true` selects an experimental
+`lockstep_ekf` adapter around the installed `robot_localization::RosEkf`.
+It retains `config/ekf.yaml` and the library's measurement/update methods;
+it replaces asynchronous subscriptions/timer scheduling with ordered captured
+inputs and exact 30 Hz update acknowledgments. This profile requires sim time,
+paused startup, the MCB consumed-tick watermark and rf2o scan receipts.
+It supports the two configured odometry sources; extra sensor/control sources
+are rejected. Missing update ticks reject the run. The hardware default is
+the standard `ekf_node`.
+The adapter cancels the upstream protected timer and clears its protected
+subscription list. This coupling to the installed 3.8.3 frontend needs the
+integration checks when upgrading robot_localization.
+
+Raw inputs are acknowledged after entering the adapter's bounded queue.
+MCB publishes its consumed-tick watermark after its raw-POSE/TF/input holds.
+Each update orders eligible inputs by capture stamp and source, then invokes
+the [installed filter API](https://github.com/cra-ros-pkg/robot_localization/blob/3.8.3/include/robot_localization/ros_filter.hpp).
+Scan input eligibility has a fixed 14 ms delay for this 100 Hz POSE/10 Hz
+scan fixture. Scan receipts distinguish published odometry from initialization
+or a failed match with no output. The adapter waits for the paired scan
+odometry message when publication was reported; arrival order cannot discard it.
+
+`/sim/lockstep/ekf_output` reports each logical update with `published` or
+`no_output`, plus `output_stamp_ns` and `raw_stamp_ns` values. The relay pairs
+that receipt with the captured filtered odometry and raw-input watermark before
+making its decision at the logical update tick. The UART barrier acknowledges
+the resulting simulator command before physics advances. The embedded correction
+keeps its future application stamp; the simulator envelope carries decision time.
+
+`ros2 run sim lockstep_ekf_suite` checks the real adapter's watermark hold,
+carried output stamp and missed-tick rejection without Gazebo. Full profile
+acceptance is tracked in the
+[dated investigation](../sim/docs/track-a-uart-2026-10-15.md).
+
 The drift and jerk suite is `ros2 launch sim localization_tests.launch.py`;
 see `sim/README.md`.
 It reads these `config/*.yaml` files from `install/`, so rebuild with
