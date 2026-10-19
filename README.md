@@ -207,9 +207,10 @@ obstacle cases together.
 about one sigma, so at 0.2 amcl can't tell poses within ~0.2m apart. That
 matched `unmapped_obstacle`'s ~0.2-0.3m noise floor, where the alpha,
 `resample_interval` and particle knobs all plateaued, pointing at the sensor
-model. Sim's lidar now matches the RPLIDAR A2M8 in its typical mode: ~800
-beams, 0.01 m noise. 0.15 measured worse (see Tuning history), but
-before this lidar change, and nothing has been re-measured since. Re-derive
+model. Sim's lidar matches the RPLIDAR A2M8's 720-bin grid with 0.01 m
+noise ([sim README](../sim/README.md#lidar-format-and-model-limits)) and runs
+on the real field mesh. 0.15 measured worse (see Tuning history), but on the
+old noise model, and nothing has been re-measured since. Re-derive
 rather than treating 0.08 as final, and check a sharper field doesn't make
 amcl brittle to real sensor noise.
 
@@ -280,6 +281,17 @@ matched a new scan, and `map->odom` froze. Live check: a stationary
 normally. 0.1m is two cells, cheap enough and prompt.
 `minimum_travel_heading` stays 0.05 rather than 0 to avoid exact-zero
 comparisons; heading never changes anyway.
+
+**min_laser_range: 0.15** (slam.yaml and amcl.yaml `laser_min_range`). The
+RPLIDAR A2M8's minimum is 0.05 m (real scans report `range_min` 0.05), so 0.15
+is a margin, not the hardware limit. It is kept because nothing proves the
+self-filter covers the body: [`lidar_self_filter`](../thornbots_pkg/README.md#lidar_self_filter)
+blanks only a CAD-derived 5-81 deg sector whose real zero direction is
+unmeasured, the head-fixed parts start 0.045 m from the lidar, and the
+2026-10-18 robot capture logged per-scan statistics, not per-beam ranges
+(0.05-0.15 m returns were never inspected). Sim cannot test it: its lidar never
+sees the robot. Lower it only after a real `/scan_raw` shows nothing of the
+robot between 0.05 and 0.15 m.
 
 **correlation_search_space_dimension: 2.5** (was 0.5) and
 **minimum_time_interval: 1.0** (was 0.5), `f23c6be`: see Tuning history.

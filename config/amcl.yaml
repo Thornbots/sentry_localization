@@ -44,7 +44,7 @@ amcl:
       z: 0.0
       yaw: 0.0
 
-    # RPLIDAR A2M8 range, matches slam.yaml/lidar_node.
+    # A2M8 range is 0.05-12 m. The 0.15 floor is a margin, as in slam.yaml.
     laser_min_range: 0.15
     laser_max_range: 12.0
 
