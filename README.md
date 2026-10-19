@@ -62,7 +62,7 @@ Other args:
 - `map_file` (default `map/clean_map`, no extension): `slam_toolbox` reads
   `<map_file>.posegraph/.data`, `amcl` reads `<map_file>.yaml`. The maps
   here (`clean_map`, `ARCC26`) are images only, in the field frame (REP-105,
-  (0, 0) at the field centre, x toward blue's base). No pose graph ships:
+  (0, 0) at the field centre, x toward blue's base; [how made](#saved-maps)). No pose graph ships:
   for `slam`, or `mapping` with `load_map:=true`, save one from a `mapping`
   run (`autosave_map`) and pass its `map_file`.
 - `load_map` (default `true`): load the saved pose graph at startup
@@ -283,6 +283,34 @@ comparisons; heading never changes anyway.
 
 **correlation_search_space_dimension: 2.5** (was 0.5) and
 **minimum_time_interval: 1.0** (was 0.5), `f23c6be`: see Tuning history.
+
+### Saved maps
+
+`map/clean_map` (AMCL default; 0.02 m, origin (-6.230545, -4.249455), 624x424,
+binary 0/255) and `map/ARCC26` (loaded by no launch; 0.05 m, origin
+(-6.23, -4.75), 252x181, 0/205/254) are field-frame images. Since 2026-10-19
+both are rasterized from the real field's `Field.stl` by
+[tools/field_map.py](tools/field_map.py), which keeps each yaml's canvas:
+
+```sh
+tools/field_map.py map/clean_map.yaml Field.stl map/clean_map.pgm --style binary \
+    --center-marker CenterMarker.stl                      # --grow 1 (default)
+tools/field_map.py map/ARCC26.yaml Field.stl map/ARCC26.pgm --style trinary \
+    --grow 0 --center-marker CenterMarker.stl
+```
+
+Both meshes are in sim `world/real_field_assmbly/meshes` (sim#30). The plane
+is the lidar height, 0.354 m, and only faces a lidar can see are drawn.
+
+Why not a slam_toolbox map: four sim sweeps on sim#31's 720-beam lidar did not
+reproduce the field. Best run (teleport grid): 5 cm-tolerant precision 0.64,
+recall 0.84, a 0.28 m frame offset, ghost returns in the barriers and box; the
+lane sweeps lost the left half (precision 0.48). AMCL on it failed one of eight
+`mcb_drive` bring-ups and pooled p95 localization error was 2.25 m, against
+0.47 m (8/8) for the rasterized map and 0.45 m (8/8) for the previous one.
+Barrier and wall positions agree; the previous map also carries a maze inside
+the bottom box and a bar at y = +3 that `Field.stl` lacks, so check those on
+the real field before relying on the new image there.
 
 ## Tuning history (2026-07-26/27)
 
