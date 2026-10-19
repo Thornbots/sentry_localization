@@ -13,6 +13,12 @@ find_package(ament_cmake REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
+find_package(nav2_amcl REQUIRED)
+find_package(nav2_map_server REQUIRED)
+find_package(nav2_lifecycle_manager REQUIRED)
+find_package(Boost REQUIRED COMPONENTS serialization)
+find_package(TBB REQUIRED)
 find_package(slam_toolbox REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -24,6 +30,11 @@ target_include_directories(${PROJECT_NAME}_core PUBLIC
   $<INSTALL_INTERFACE:include>)
 
 add_executable(passthrough_odom_publisher src/passthrough_odom_publisher.cpp)
+add_executable(localization_backend src/localization_backend.cpp)
+ament_target_dependencies(localization_backend
+  rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox)
+# slam_toolbox exports its backend libraries separately from its rosidl targets.
+target_link_libraries(localization_backend ${slam_toolbox_LIBRARIES} Boost::serialization TBB::tbb)
 ament_target_dependencies(passthrough_odom_publisher nav_msgs rclcpp)
 add_executable(ekf_input_publisher src/ekf_input_publisher.cpp)
 target_include_directories(ekf_input_publisher PRIVATE include)
@@ -42,7 +53,7 @@ install(TARGETS ${PROJECT_NAME}_core
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
-install(TARGETS passthrough_odom_publisher ekf_input_publisher map_pose_publisher map_autosaver
+install(TARGETS localization_backend passthrough_odom_publisher ekf_input_publisher map_pose_publisher map_autosaver
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config map DESTINATION share/${PROJECT_NAME})
 

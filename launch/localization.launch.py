@@ -129,10 +129,6 @@ def generate_launch_description():
         ["'", localization_mode, "' == 'mapping' and '",
          LaunchConfiguration('load_map'), "' == 'false'"]
     )
-    slam_toolbox_selected = PythonExpression(
-        ["'", localization_mode, "' == 'mapping' or ('", localization_mode,
-         "' == 'slam' and '", LaunchConfiguration('load_map'), "' == 'true')"]
-    )
     map_selected = PythonExpression(
         ["'", localization_mode, "' != 'none'"]
     )
@@ -265,120 +261,48 @@ def generate_launch_description():
         }],
     )
 
-    map_server_node = Node(
-        package='nav2_map_server',
-        executable='map_server',
-        name='map_server',
-        output='screen',
+    # Construct backend components locally; no load_node RPC can race discovery.
+    amcl_container = Node(
+        package='sentry_localization', executable='localization_backend',
+        name='localization_container', arguments=['amcl'], output='screen',
         condition=IfCondition(amcl_selected),
-        parameters=[{
+        parameters=[amcl_params_file, {
             'use_sim_time': use_sim_time,
             'yaml_filename': map_yaml_file,
-        }],
-    )
-
-    amcl_node = Node(
-        package='nav2_amcl',
-        executable='amcl',
-        name='amcl',
-        output='screen',
-        condition=IfCondition(amcl_selected),
-        parameters=[
-            amcl_params_file,
-            {
-                'use_sim_time': use_sim_time,
-                'odom_frame_id': LaunchConfiguration('odom_frame'),
-                'base_frame_id': 'root',
-                'initial_pose.x': ParameterValue(
-                    LaunchConfiguration('initial_x'), value_type=float),
-                'initial_pose.y': ParameterValue(
-                    LaunchConfiguration('initial_y'), value_type=float),
-                'global_frame_id': 'map',
-                'scan_topic': '/scan',
-            },
-        ],
-    )
-
-    # map_server/amcl are nav2 lifecycle nodes -- they start unconfigured
-    # and inactive on their own; this brings both up automatically
-    # instead of requiring a manual configure/activate service call.
-    amcl_lifecycle_manager_node = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_localization',
-        output='screen',
-        condition=IfCondition(amcl_selected),
-        parameters=[{
-            'use_sim_time': use_sim_time,
+            'odom_frame_id': LaunchConfiguration('odom_frame'),
+            'base_frame_id': 'root',
+            'initial_pose.x': ParameterValue(
+                LaunchConfiguration('initial_x'), value_type=float),
+            'initial_pose.y': ParameterValue(
+                LaunchConfiguration('initial_y'), value_type=float),
+            'global_frame_id': 'map',
+            'scan_topic': '/scan',
             'autostart': True,
             'node_names': ['map_server', 'amcl'],
-        }],
-    )
+        }])
 
-    # Two variants of the same node (mirrors sim.launch.py's gz_sim/
-    # gz_sim_headless split): map_file_name is only meaningful to
-    # slam_toolbox when actually set, and launch Node parameter dicts are
-    # static, so load_map:=false needs a version of this node that omits
-    # the key entirely rather than passing it empty. Both are also gated
-    # on localization_mode being slam/mapping -- not launched at all when
-    # localization_mode is amcl/none.
-    slam_toolbox_with_map_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        condition=IfCondition(slam_toolbox_with_map_selected),
-        parameters=[
-            slam_params_file,
-            {
-                'use_sim_time': use_sim_time,
-                'odom_frame': LaunchConfiguration('odom_frame'),
-                'map_file_name': LaunchConfiguration('map_file'),
-                'map_start_pose': [0.0, 0.0, 0.0],
-                'mode': slam_toolbox_mode_param,
-                'use_map_saver': ParameterValue(
-                    mapping_selected, value_type=bool
-                ),
-                'use_lifecycle_manager': True,
-            },
-        ],
-    )
-    slam_toolbox_no_map_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        condition=IfCondition(slam_toolbox_no_map_selected),
-        parameters=[
-            slam_params_file,
-            {
-                'use_sim_time': use_sim_time,
-                'odom_frame': LaunchConfiguration('odom_frame'),
-                # Always mapping: this variant only ever launches when
-                # localization_mode:=mapping (see
-                # slam_toolbox_no_map_selected above) -- there's no saved
-                # map to localize against without load_map anyway.
-                'mode': 'mapping',
-                'use_map_saver': True,
-                'use_lifecycle_manager': True,
-            },
-        ],
-    )
-
-    # slam_toolbox is a lifecycle node since Jazzy (2.8) and starts
-    # unconfigured; same bring-up as amcl's lifecycle manager above.
-    slam_lifecycle_manager_node = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_slam',
-        output='screen',
-        condition=IfCondition(slam_toolbox_selected),
-        parameters=[{
+    def slam_container(condition, load_map):
+        params = {
             'use_sim_time': use_sim_time,
+            'odom_frame': LaunchConfiguration('odom_frame'),
+            'mode': slam_toolbox_mode_param,
+            'use_map_saver': ParameterValue(mapping_selected, value_type=bool),
+            'use_lifecycle_manager': True,
             'autostart': True,
             'node_names': ['slam_toolbox'],
-        }],
-    )
+        }
+        if load_map:
+            params.update({
+                'map_file_name': LaunchConfiguration('map_file'),
+                'map_start_pose': [0.0, 0.0, 0.0],
+            })
+        return Node(
+            package='sentry_localization', executable='localization_backend',
+            name='slam_container', arguments=['slam'], output='screen',
+            condition=IfCondition(condition), parameters=[slam_params_file, params])
+
+    slam_with_map_container = slam_container(slam_toolbox_with_map_selected, True)
+    slam_no_map_container = slam_container(slam_toolbox_no_map_selected, False)
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -390,7 +314,5 @@ def generate_launch_description():
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
         passthrough_odom_node, ekf_input_node, ekf_node,
         scan_odom_node, map_pose_node, map_autosaver_node,
-        slam_toolbox_with_map_node, slam_toolbox_no_map_node,
-        slam_lifecycle_manager_node,
-        map_server_node, amcl_node, amcl_lifecycle_manager_node,
+        slam_with_map_container, slam_no_map_container, amcl_container,
     ])
