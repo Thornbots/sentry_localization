@@ -62,6 +62,19 @@ if(BUILD_TESTING)
   find_package(ament_cmake_flake8 REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_pep257 REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_field_map test/test_field_map.py TIMEOUT 120
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    ENV "PYTEST_ADDOPTS=-p no:anyio")
+  set(SENTRY_FIELD_MAP_WORLD "" CACHE FILEPATH "Optional corrected-field SDF for map reproduction tests")
+  if(SENTRY_FIELD_MAP_WORLD)
+    if(NOT EXISTS "${SENTRY_FIELD_MAP_WORLD}")
+      message(FATAL_ERROR "SENTRY_FIELD_MAP_WORLD must name an existing SDF fixture")
+    endif()
+    ament_add_pytest_test(test_field_map_fixture test/test_field_map_fixture.py TIMEOUT 120
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      ENV "PYTEST_ADDOPTS=-p no:anyio" "FIELD_MAP_WORLD=${SENTRY_FIELD_MAP_WORLD}")
+  endif()
   ament_copyright(launch src include test)
   ament_flake8(launch)
   ament_pep257(launch)
