@@ -134,10 +134,12 @@ one already rejected.
 
 rf2o grades every scan match good, degraded or failed, from its own
 evidence only: whether it solved, the fraction of valid beams, the match's
-own covariance (`cov_odo`), a 6 m/s speed limit, scan gaps, and a stale
-lidar extrinsic (the latest head TF more than `max_extrinsic_age` older
-than the scan). It never compares against `/odom`, because on Bumpy Road
-the wheels slip and rf2o is the one that's right.
+own covariance (`cov_odo`), a 6 m/s speed limit and scan gaps. It never
+compares against `/odom`, because on Bumpy Road the wheels slip and rf2o is
+the one that's right. A scan whose lidar extrinsic is stale (the latest head
+TF more than `max_extrinsic_age` older than the scan) is skipped like a
+dropped scan: the head's swing since the last match is unknown, and
+matching across it reads that swing as translation.
 
 - good: `position_covariance` (0.02 m std-dev).
 - degraded: adds `degraded_position_variance` along each weak axis of
@@ -170,10 +172,17 @@ failed on speed (7-18 m/s), `scan_degraded`'s 60 deg arc failed on
 against 0.415 and 0.434 m failed: within run-to-run spread, so it stays
 failed.
 
-Until 2026-09-28 any extrinsic not exactly at the scan's stamp was stale.
-The lidar rides the head's yaw joint, whose TF trails every scan by one
-sim step (0.01 s), so 94% of clean matches graded degraded and the EKF
-leaned on `/odom`: `suite:=ekf` fell from ~95% to 75-80% better than raw.
+Until 2026-09-28 any extrinsic not exactly at the scan's stamp was stale,
+so 94% of clean matches graded degraded and the EKF leaned on `/odom`:
+`suite:=ekf` fell from ~95% to 75-80% better than raw. The lidar rides the
+head's yaw joint 0.22 m off its axis, and its TF comes from
+`robot_state_publisher` at the 90 Hz POSE rate
+([auto.launch.py](../thornbots_pkg/README.md#pose_translator)). Each match
+is seeded with the head's swing between the two scans' extrinsics. Until
+2026-10-22 the head TF was throttled to 20 Hz and the seed held the head
+still, so a parked robot gained 0.1-0.4 m whenever the head slewed onto a
+target; nothing corrects that while parked, since AMCL waits for
+`update_min_d` of motion.
 
 Two upstream bugs are fixed with it, in every mode: a failed match used to
 republish the previous pose at full confidence, and a scan with too few
