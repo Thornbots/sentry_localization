@@ -60,9 +60,8 @@ can move.
 Other args:
 
 - `map_file` (default `map/clean_map`, no extension): `slam_toolbox` reads
-  `<map_file>.posegraph/.data`, `amcl` reads `<map_file>.yaml`. The maps
-  here (`clean_map`, `ARCC26`) are images only, in the field frame (REP-105,
-  (0, 0) at the field centre, x toward blue's base). No pose graph ships:
+  `<map_file>.posegraph/.data`, `amcl` reads `<map_file>.yaml`. The
+  shipped `clean_map` is the [CAD-derived occupancy map](#saved-map). No pose graph ships:
   for `slam`, or `mapping` with `load_map:=true`, save one from a `mapping`
   run (`autosave_map`) and pass its `map_file`.
 - `load_map` (default `true`): load the saved pose graph at startup
@@ -94,7 +93,7 @@ It reads these `config/*.yaml` files from `install/`, so rebuild with
 
 `colcon test --packages-select sentry_localization` runs the ament copyright,
 flake8 and pep257 checks on `launch/`, plus gtest unit tests for
-`map_pose_core` and `map_image`.
+`map_pose_core` and `map_image`, and the standalone [field-map tests](#saved-map).
 
 ## Notes
 
@@ -385,3 +384,63 @@ at a known team spawn; the default stays `(0, 0)`. `root` remains heading-fixed.
 Scan odometry initializes from the first `/odom` pose so it shares the
 firmware's origin. Starting the EKF at zero with a nonzero firmware pose
 would otherwise make `mcb_relay` immediately reset the firmware to zero.
+
+## Saved map
+
+`clean_map` is the canonical CAD-derived occupancy image for the corrected
+2026-10-20 field export, not a SLAM map or serialized pose graph. Geometry
+and frame placement come from [sim's world](../sim/README.md#the-world-frame).
+Its 2 cm canvas, YAML origin and thresholds are unchanged. The field frame
+is REP-105, centred at (0, 0), with x toward blue's base. Pixels
+are 0 occupied, 254 free and 128 unknown, including unobserved exterior and
+enclosed regions. The generator requires trinary mode (also the default when
+omitted), negate=0 and thresholds that decode all three intensities with a
+strict margin: 128 corresponds to occupancy 127/255, between this map's
+free and occupied thresholds. YAML metadata stays unchanged.
+
+`tools/field_map.py` continues the CAD-slice workflow from the held map draft,
+reading collision poses/scales from the SDF instead of duplicating placement.
+It slices at nominal lidar z = 0.3543931 m (estimated root height
+approximately 0.0093 m plus URDF mount 0.3450931 m), flood fills the field
+interior from (0, 0), keeps surfaces bordering that interior,
+and grows occupied cells by one cell to cover raster discretization.
+Plane intersections use a 1e-7 m tolerance to classify on-plane vertices and
+deduplicate endpoints; noncoplanar intersections use the farthest distinct
+endpoints. A single tangent vertex contributes no segment. A coplanar edge
+contributes that edge; a fully coplanar face contributes its three edges,
+not a filled horizontal surface. Segments are sampled at resolution/4,
+which is approximate rasterization rather than an exact supercover. This
+is a horizontal ideal-geometry slice; it does not model robot tilt, sensor
+noise, dynamic obstacles or material returns. Confirm the export against
+the physical field before relying on this map on hardware.
+
+NumPy, SciPy, Pillow, PyYAML and pytest are declared test dependencies;
+`rosdep install` supplies them for the existing colcon/CI test workflow.
+No extra runtime dependency is needed to load the shipped PGM assets.
+With those dependencies available, regenerate from this package:
+
+```bash
+python3 tools/field_map.py map/clean_map.yaml ../sim/world/ARCC_Field_2026.sdf map/clean_map.pgm --z 0.3543931 --grow 1
+python3 -m pytest test/test_field_map.py
+```
+
+The registered `test_field_map` test always checks synthetic plane/mesh
+fixtures, metadata constraints and independent YAML-based decoding of the
+saved image; it runs in a standalone localization checkout without sim.
+Optional actual-field bounds and image reproduction use an explicitly
+supplied corrected-world fixture (including its package-relative meshes):
+
+```bash
+FIELD_MAP_WORLD=/path/to/sim/world/ARCC_Field_2026.sdf python3 -m pytest test/test_field_map_fixture.py
+```
+
+To register that additional test during a colcon build, pass
+`--cmake-args -DSENTRY_FIELD_MAP_WORLD=/path/to/sim/world/ARCC_Field_2026.sdf`.
+Without that option only the standalone suite is registered; direct pytest
+collection reports the actual-field tests skipped when no fixture is given.
+An explicitly provided missing or incompatible fixture fails the test/build.
+
+The restored bar at y approximately +3 m now intersects the lidar slice.
+This static CAD map has no measured runtime localization accuracy. It still
+needs AMCL/scan agreement validation on the corrected world; prior-export
+localization measurements do not validate it.
