@@ -186,6 +186,11 @@ def test_room_has_no_field_inputs_and_keeps_boot_coordinates(tmp_path):
     [
         (["mapping", "--room", "real_hardware:=false"], ["use_rf2o:=false"]),
         (
+            ["mapping", "--raw-odom", "--odom-x", "-5", "--odom-y", "0",
+             "real_hardware:=false"],
+            ["use_rf2o:=false", "initial_x:=-5.0"],
+        ),
+        (
             ["mapping", "--odom-x", "-4", "--odom-y", "0", "real_hardware:=false"],
             ["use_rf2o:=true", "initial_x:=-4.0"],
         ),

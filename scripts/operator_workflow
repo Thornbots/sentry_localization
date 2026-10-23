@@ -639,6 +639,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     mapping = commands.add_parser("mapping")
     mapping.add_argument("--room", action="store_true")
+    mapping.add_argument("--raw-odom", action="store_true",
+                         help="Use wheel odometry directly instead of rf2o/EKF")
     mapping.add_argument("--odom-x", type=float)
     mapping.add_argument("--odom-y", type=float)
     mapping.add_argument("launch_args", nargs="*")
@@ -661,6 +663,8 @@ def main():
     checking.add_argument("directory")
     localizing = commands.add_parser("localize")
     localizing.add_argument("directory")
+    localizing.add_argument("--raw-odom", action="store_true",
+                            help="Use wheel odometry directly instead of rf2o/EKF")
     localizing.add_argument("--odom-x", type=float)
     localizing.add_argument("--odom-y", type=float)
     localizing.add_argument("launch_args", nargs="*")
@@ -751,7 +755,7 @@ def main():
                     "autosave_map:=false",
                     f"initial_x:={args.odom_x or 0.0}",
                     f"initial_y:={args.odom_y or 0.0}",
-                    f"use_rf2o:={str(not args.room).lower()}",
+                    f"use_rf2o:={str(not (args.room or args.raw_odom)).lower()}",
                 ]
             else:
                 manifest = check(args.directory)
@@ -767,7 +771,7 @@ def main():
                     f"map_file:={Path(args.directory).resolve() / 'field'}",
                     f"initial_x:={args.odom_x or 0.0}",
                     f"initial_y:={args.odom_y or 0.0}",
-                    f"use_rf2o:={str(not room_mode).lower()}",
+                    f"use_rf2o:={str(not (room_mode or args.raw_odom)).lower()}",
                     f"amcl_initial_x:={x}",
                     f"amcl_initial_y:={y}",
                     f"amcl_initial_yaw:={yaw}",

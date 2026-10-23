@@ -416,18 +416,22 @@ the robot; discovery cannot detect a stack hidden in another domain.
    ros2 run sentry_localization operator_workflow mapping --room
    ```
 
-   Field mapping keeps the usual rf2o/EKF stack; supply the firmware navigation
+   For field mapping use raw wheel odometry as SLAM input; supply the firmware navigation
    boot coordinates, **not** the measured physical field start:
 
    ```bash
-   ros2 run sentry_localization operator_workflow mapping --odom-x -4.625 --odom-y 0
+   ros2 run sentry_localization operator_workflow mapping --raw-odom --odom-x -4.625 --odom-y 0
    ```
 
    Additional `auto.launch.py` arguments follow the options, for example
    `real_hardware:=false`. Workflow-owned arguments cannot be overridden.
    Room mode forces `use_rf2o:=false`, using raw wheel-pose passthrough in
    `nav_odom`; it avoids an unknown EKF seed and is a rehearsal mode, not an
-   rf2o accuracy test. Field mode forces `use_rf2o:=true` with the supplied seed.
+   rf2o accuracy test. `--raw-odom` selects that same input for field mapping or
+   localization. Without it, field mode uses rf2o/EKF with the supplied seed.
+   The field rehearsal exposed severe mapping divergence with rf2o/EKF; raw
+   wheel input avoids stacking its lidar corrections with SLAM's. This does
+   not remove the need to assess wheel slip and mapping quality on hardware.
 
 2. **Before driving**, park the chassis and head, then in another terminal:
 
