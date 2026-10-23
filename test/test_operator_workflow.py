@@ -265,6 +265,10 @@ def test_room_has_no_field_inputs_and_keeps_boot_coordinates(tmp_path):
         ),
         (
             ["mapping", "SESSION", "real_hardware:=false"],
+            ["use_rf2o:=false", "seed_from_raw_odom:=true", "autosave_map:=true"],
+        ),
+        (
+            ["mapping", "SESSION", "--rf2o", "real_hardware:=false"],
             ["use_rf2o:=true", "seed_from_raw_odom:=true", "autosave_map:=true"],
         ),
         (
@@ -274,11 +278,15 @@ def test_room_has_no_field_inputs_and_keeps_boot_coordinates(tmp_path):
                 "real_hardware:=false",
             ],
             [
-                "use_rf2o:=true",
+                "use_rf2o:=false",
                 "seed_from_raw_odom:=true",
                 "amcl_initial_x:=-4.3",
                 "amcl_initial_yaw:=0.2",
             ],
+        ),
+        (
+            ["localize", "BUNDLE", "--rf2o", "real_hardware:=false"],
+            ["use_rf2o:=true", "amcl_initial_x:=-4.3"],
         ),
     ],
 )
@@ -331,6 +339,18 @@ def test_room_localize_no_odometry_seed_and_rejects_rf2o_override(monkeypatch):
     with pytest.raises(SystemExit) as result:
         workflow.main()
     assert result.value.code == 1
+    assert not captured
+    for command in (["mapping", "SESSION", "--room", "--rf2o"], ["localize", "BUNDLE", "--rf2o"]):
+        monkeypatch.setattr(sys, "argv", ["operator_workflow", *command])
+        with pytest.raises(SystemExit) as result:
+            workflow.main()
+        assert result.value.code == 1
+    monkeypatch.setattr(
+        sys, "argv", ["operator_workflow", "mapping", "SESSION", "--raw-odom", "--rf2o"]
+    )
+    with pytest.raises(SystemExit) as result:
+        workflow.main()
+    assert result.value.code == 2
     assert not captured
 
 
@@ -467,3 +487,58 @@ def test_failed_localize_stops_owned_launch_without_pass(monkeypatch, tmp_path, 
         )
     assert processes[0].poll() is not None
     assert "LOCALIZE PASS" not in capsys.readouterr().out
+
+
+
+@pytest.mark.parametrize("initial,paused,after,live,error", [
+    (False, True, True, "live", None), (True, True, True, "live", None),
+    (True, False, False, "live", None), (False, True, False, "live", "did not change"),
+    (False, True, True, "other", "session differs"),
+])
+def test_insertion_toggle_is_idempotent_and_verified(
+    monkeypatch, tmp_path, initial, paused, after, live, error
+):
+    import sys
+
+    (tmp_path / "session.json").write_text(json.dumps(dict(session_id="live")))
+    state = dict(value=initial, toggles=0)
+
+    def toggle(_request):
+        state["toggles"] += 1
+        state["value"] = after
+        return NS(status=True)
+
+    def get(_request):
+        return NS(values=[NS(type=1, bool_value=state["value"])])
+
+    def client(_kind, name):
+        handler = toggle if name.endswith("pause_new_measurements") else get
+        return NS(service_is_ready=lambda: True,
+                  call_async=lambda r: NS(done=lambda: True, result=lambda: handler(r)))
+
+    class Runtime:
+        def __init__(self, _sim):
+            self.subscriptions = []
+            self.node = NS(create_client=client, create_subscription=(
+                lambda kind, topic, callback, qos: callback(NS(data=live))))
+
+        def wait(self, predicate, timeout):
+            assert predicate()
+
+        def close(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "rcl_interfaces.srv", NS(GetParameters=NS(Request=NS)))
+    monkeypatch.setitem(sys.modules, "slam_toolbox.srv", NS(Pause=NS(Request=NS)))
+    monkeypatch.setitem(sys.modules, "std_msgs.msg", NS(String=object))
+    monkeypatch.setitem(sys.modules, "rclpy.qos", NS(
+        QoSProfile=lambda **kw: None, DurabilityPolicy=NS(TRANSIENT_LOCAL=1)))
+    monkeypatch.setattr(workflow, "Runtime", Runtime)
+    args = NS(session=str(tmp_path), sim_time=False, timeout=1)
+    if error:
+        with pytest.raises((RuntimeError, ValueError), match=error):
+            workflow.set_insertion(args, paused)
+    else:
+        workflow.set_insertion(args, paused)
+        assert state["value"] == paused
+    assert state["toggles"] == (0 if live != "live" or initial == paused else 1)

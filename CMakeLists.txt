@@ -32,7 +32,8 @@ target_include_directories(${PROJECT_NAME}_core PUBLIC
 add_executable(passthrough_odom_publisher src/passthrough_odom_publisher.cpp)
 add_executable(localization_backend src/localization_backend.cpp)
 ament_target_dependencies(localization_backend
-  rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox)
+  rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox
+  sensor_msgs tf2 tf2_ros)
 # slam_toolbox exports its backend libraries separately from its rosidl targets.
 target_link_libraries(localization_backend ${slam_toolbox_LIBRARIES} Boost::serialization TBB::tbb)
 ament_target_dependencies(passthrough_odom_publisher nav_msgs rclcpp)

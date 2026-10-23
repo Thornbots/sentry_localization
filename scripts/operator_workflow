@@ -813,6 +813,58 @@ def convergence(args):
         runtime.close()
 
 
+def set_insertion(args, paused):
+    """Set slam_toolbox scan insertion; its service toggles, so read, call once, verify."""
+    from rcl_interfaces.srv import GetParameters
+    from slam_toolbox.srv import Pause
+    from std_msgs.msg import String
+    from rclpy.qos import QoSProfile, DurabilityPolicy
+
+    expected = json.loads((Path(args.session) / "session.json").read_text())["session_id"]
+    runtime = Runtime(args.sim_time)
+    try:
+        live = {}
+        runtime.subscriptions.append(
+            runtime.node.create_subscription(
+                String,
+                "/operator_workflow/session",
+                lambda m: live.update(session_id=m.data),
+                QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+            )
+        )
+        runtime.wait(lambda: "session_id" in live, args.timeout)
+        if live["session_id"] != expected:
+            raise ValueError("live mapping session differs from this session directory")
+        getter = runtime.node.create_client(GetParameters, "/slam_toolbox/get_parameters")
+        toggle = runtime.node.create_client(Pause, "/slam_toolbox/pause_new_measurements")
+
+        def call(client, request):
+            runtime.wait(client.service_is_ready, args.timeout)
+            future = client.call_async(request)
+            runtime.wait(future.done, args.timeout)
+            return future.result()
+
+        def state():
+            values = call(
+                getter, GetParameters.Request(names=["paused_new_measurements"])
+            ).values
+            if len(values) != 1 or values[0].type != 1:
+                raise RuntimeError("slam_toolbox paused_new_measurements is unavailable")
+            return values[0].bool_value
+
+        if state() != paused:
+            if not call(toggle, Pause.Request()).status:
+                raise RuntimeError("slam_toolbox refused the pause toggle")
+            if state() != paused:
+                raise RuntimeError("scan insertion state did not change; check before driving")
+    finally:
+        runtime.close()
+    if paused:
+        print("SCAN INSERTION PAUSED: transfer with existing controls, stop on level ground and settle.")
+    else:
+        print("SCAN INSERTION RESUMED: sweep the head parked; check scans stay on mapped walls.")
+
+
 def ensure_stack_stopped():
     """Bound graph discovery and refuse a duplicate robot/localization stack."""
     runtime = Runtime()
@@ -934,11 +986,6 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     mapping = commands.add_parser("mapping")
     mapping.add_argument("--room", action="store_true")
-    mapping.add_argument(
-        "--raw-odom",
-        action="store_true",
-        help="Use wheel odometry directly instead of rf2o/EKF",
-    )
     mapping.add_argument("session")
     mapping.add_argument("launch_args", nargs="*")
     saving = commands.add_parser("save")
@@ -955,16 +1002,19 @@ def main():
     room.add_argument("source")
     checking = commands.add_parser("check")
     checking.add_argument("directory")
+    pausing = commands.add_parser("pause")
+    resuming = commands.add_parser("resume")
+    for command in (pausing, resuming):
+        command.add_argument("session")
     localizing = commands.add_parser("localize")
     localizing.add_argument("directory")
     for command in (mapping, localizing):
+        # Raw wheel input is the default; see README "Broad-field coverage".
+        inputs = command.add_mutually_exclusive_group()
+        inputs.add_argument("--raw-odom", action="store_true", help="Wheel odometry (default)")
+        inputs.add_argument("--rf2o", action="store_true", help="Fuse rf2o/EKF instead")
         command.add_argument("--no-referee", action="store_true")
         command.add_argument("--team", choices=["red", "blue"])
-    localizing.add_argument(
-        "--raw-odom",
-        action="store_true",
-        help="Use wheel odometry directly instead of rf2o/EKF",
-    )
     localizing.add_argument("launch_args", nargs="*")
     monitoring = commands.add_parser("convergence")
     monitoring.add_argument("directory")
@@ -974,7 +1024,9 @@ def main():
     monitoring.add_argument("--max-yaw", type=float, default=0.25)
     monitoring.add_argument("--hold", type=float, default=5.0)
     monitoring.add_argument("--samples", type=int, default=5)
-    for command in (saving, monitoring, booting, preflighting, mapping, localizing):
+    for command in (
+        saving, monitoring, booting, preflighting, mapping, localizing, pausing, resuming
+    ):
         command.add_argument("--sim-time", action="store_true")
         command.add_argument("--timeout", type=float, default=60.0)
         command.add_argument(
@@ -1054,8 +1106,12 @@ def main():
             check(args.directory)
         elif args.command == "convergence":
             convergence(args)
+        elif args.command in ("pause", "resume"):
+            set_insertion(args, args.command == "pause")
         else:
             extra = args.launch_args
+            if args.rf2o and getattr(args, "room", False):
+                raise ValueError("room mode always uses raw wheel passthrough; drop --rf2o")
             if args.no_referee and (getattr(args, "room", False) or args.team is None):
                 raise ValueError("--no-referee requires --team red|blue in field mode")
             protected = {
@@ -1083,18 +1139,20 @@ def main():
                     "autosave_map:=true",
                     f"map_save_dir:={session / 'backup'}",
                     "seed_from_raw_odom:=true",
-                    f"use_rf2o:={str(not (args.room or args.raw_odom)).lower()}",
+                    f"use_rf2o:={str(args.rf2o and not args.room).lower()}",
                 ]
             else:
                 manifest = check(args.directory)
                 room_mode = manifest.get("frame_mode") == "room"
+                if args.rf2o and room_mode:
+                    raise ValueError("room bundles always use raw wheel passthrough; drop --rf2o")
                 x, y, yaw = manifest["initial_root"]
                 launch += [
                     "localization_mode:=amcl",
                     "autosave_map:=false",
                     f"map_file:={Path(args.directory).resolve() / 'field'}",
                     "seed_from_raw_odom:=true",
-                    f"use_rf2o:={str(not (room_mode or args.raw_odom)).lower()}",
+                    f"use_rf2o:={str(args.rf2o and not room_mode).lower()}",
                     f"amcl_initial_x:={x}",
                     f"amcl_initial_y:={y}",
                     f"amcl_initial_yaw:={yaw}",
@@ -1109,6 +1167,7 @@ def main():
                 "prepare-room": "localize",
                 "check": "localize",
                 "convergence": "check",
+                "pause": "resume",
             }.get(args.command)
             if next_step:
                 suffix = (
