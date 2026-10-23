@@ -272,9 +272,11 @@ def generate_launch_description():
             'odom_frame_id': LaunchConfiguration('odom_frame'),
             'base_frame_id': 'root',
             'initial_pose.x': ParameterValue(
-                LaunchConfiguration('initial_x'), value_type=float),
+                LaunchConfiguration('amcl_initial_x'), value_type=float),
             'initial_pose.y': ParameterValue(
-                LaunchConfiguration('initial_y'), value_type=float),
+                LaunchConfiguration('amcl_initial_y'), value_type=float),
+            'initial_pose.yaw': ParameterValue(
+                LaunchConfiguration('amcl_initial_yaw'), value_type=float),
             'global_frame_id': 'map',
             'scan_topic': '/scan',
             'autostart': True,
@@ -306,9 +308,17 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'initial_x', default_value='0.0', description='Known initial field X, meters'),
+            'initial_x', default_value='0.0',
+            description='Initial firmware navigation X for EKF, meters'),
         DeclareLaunchArgument(
-            'initial_y', default_value='0.0', description='Known initial field Y, meters'),
+            'initial_y', default_value='0.0',
+            description='Initial firmware navigation Y for EKF, meters'),
+        DeclareLaunchArgument('amcl_initial_x', default_value=LaunchConfiguration('initial_x'),
+                              description='AMCL field X; independent of EKF navigation seed'),
+        DeclareLaunchArgument('amcl_initial_y', default_value=LaunchConfiguration('initial_y'),
+                              description='AMCL field Y; independent of EKF navigation seed'),
+        DeclareLaunchArgument('amcl_initial_yaw', default_value='0.0',
+                              description='Field root yaw, not chassis joint yaw, radians'),
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,

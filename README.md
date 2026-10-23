@@ -21,12 +21,9 @@ for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
   0.02 m std gate it never passes (2026-10-02, sim: amcl 0.17-0.30 m,
   mapping 0.05-0.08 m).
 
-`thornbots_pkg/launch/auto.launch.py` includes `launch/localization.launch.py`
-and forwards its args. Standalone, for testing:
-
-```bash
-ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
-```
+`thornbots_pkg/launch/auto.launch.py` includes `launch/localization.launch.py`.
+Use that robot entrypoint; do not run a second localization launch alongside it.
+The [operator workflow](#field-day-and-room-workflow) wraps the same entrypoint.
 
 `localization_mode` picks the `map->nav_odom` owner:
 
@@ -77,7 +74,7 @@ Other args:
   find `/map` within 2 s, and on the sentry mostly didn't. Load one back
   with `load_map:=true map_file:=<dir>/map`. Saved-map startup currently
   hard-codes `map_start_pose` to `[0, 0, 0]`; `initial_x`/`initial_y` seed
-  EKF and AMCL only. Loading at a nonzero field spawn still needs
+  EKF and, by default, AMCL only. Loading at a nonzero field spawn still needs
   [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
 
 Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_pose_publisher` (math in
@@ -388,11 +385,167 @@ correction and slam_toolbox's correction stack on the same lidar data.
 
 ### Initial field position
 
-`auto.launch.py initial_x:=4.625 initial_y:=0.0` seeds the EKF and AMCL
-at a known team spawn; the default stays `(0, 0)`. `root` remains heading-fixed.
-Scan odometry initializes from the first `/odom` pose so it shares the
-firmware's origin. Starting the EKF at zero with a nonzero firmware pose
-would otherwise make `mcb_relay` immediately reset the firmware to zero.
+`initial_x/y` seed the navigation EKF in firmware odometry coordinates. AMCL
+uses independent `amcl_initial_x/y/yaw`; x/y default to `initial_x/y`, yaw to
+zero for compatibility. A measured field start belongs only in AMCL. Feeding
+it to EKF can make `mcb_relay` reset firmware navigation to the wrong position.
+Raw odometry and its constants remain unchanged. `root` has identity raw yaw;
+chassis heading is the separate `chassis_yaw` joint. Field root yaw is measured
+chassis heading minus the captured boot chassis heading, not chassis heading
+itself. Team is a registration label; it never mirrors coordinates implicitly.
+
+On a different field, the measured start may differ from firmware `START_X` /
+`START_Y`. Pass the coordinates firmware actually reports to the navigation
+seed; register the map with the measured physical pose. This changes only
+map localization. It does not relocate raw CV aim, firmware routes or waypoints;
+the team must match those assumptions separately before autonomous use.
+
+## Field-day and room workflow
+
+Rebuild/source the overlay before use (`colcon build --symlink-install
+--packages-select sentry_localization thornbots_pkg`, then `source install/setup.bash`).
+These commands run in the robot container. Stop the existing robot service or
+launch first; see the [full robot pipeline](../realsense-yolov8-nitros-bridge/README.md#full-robot-pipeline).
+`mapping` and `localize` refuse discovered existing stack nodes after a bounded
+three-second DDS discovery window. Use the same ROS domain and middleware as
+the robot; discovery cannot detect a stack hidden in another domain.
+
+1. Start **one** mapping stack. Room rehearsal needs no external start pose:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow mapping --room
+   ```
+
+   Field mapping keeps the usual rf2o/EKF stack; supply the firmware navigation
+   boot coordinates, **not** the measured physical field start:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow mapping --odom-x -4.625 --odom-y 0
+   ```
+
+   Additional `auto.launch.py` arguments follow the options, for example
+   `real_hardware:=false`. Workflow-owned arguments cannot be overridden.
+   Room mode forces `use_rf2o:=false`, using raw wheel-pose passthrough in
+   `nav_odom`; it avoids an unknown EKF seed and is a rehearsal mode, not an
+   rf2o accuracy test. Field mode forces `use_rf2o:=true` with the supplied seed.
+
+2. **Before driving**, park the chassis and head, then in another terminal:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow boot-pose /workspaces/isaac_ros-dev/maps/boot.json
+   ```
+
+   This checks 20 fresh lidar scans for fixed beam count/angular geometry and
+   captures stamped `map->root` plus `chassis_yaw` over at least two seconds,
+   rejecting movement over 3 cm or 0.03 rad. Boot root may be nonzero: SLAM can
+   retain firmware odometry offsets. Do not substitute zero. A fresh map,
+   capture and save must belong to the same uninterrupted mapping session.
+   Capture is explicit; mapping launch alone does not report capture readiness.
+
+3. Map by hand using existing operator controls. Return to the captured start,
+   park, inspect map coverage/loop closure in RViz, then explicitly save:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow save /workspaces/isaac_ros-dev/maps/session --boot /workspaces/isaac_ros-dev/maps/boot.json
+   ```
+
+   Success requires a fresh `/map`, serialize service `result == 0`, readable
+   occupancy YAML/PGM, nonempty `.posegraph` **and** `.data`, and the boot record.
+   A new staging directory prevents stale files from passing; only a validated
+   snapshot is renamed to the requested destination. Existing outputs are
+   rejected. Remain parked through saving: occupancy and graph are sequential
+   snapshots, not a transactional slam_toolbox snapshot. Autosaving is disabled
+   in this workflow and is not a replacement for this explicit save.
+
+4. Prepare the deployment occupancy bundle. **Room rehearsal**, without team
+   or measured pose, retains the SLAM coordinates and captured AMCL root pose:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow prepare-room /workspaces/isaac_ros-dev/maps/session /workspaces/isaac_ros-dev/maps/room
+   ```
+
+   **Competition field**, using surveyed metres/radians in the field-centred
+   axes (x toward blue), registers the captured root to the measured start:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow align /workspaces/isaac_ros-dev/maps/session /workspaces/isaac_ros-dev/maps/field --team red --x -4.4 --y 0.1 --yaw 3.141593
+   ```
+
+   `--yaw` is the measured **chassis** heading at boot. The captured joint yaw
+   supplies its reference. The rigid transform maps captured boot root onto
+   measured start; nonzero rotation resamples pixel cell centres with nearest
+   neighbours into a yaw-zero occupancy raster, with unknown exterior padding.
+   AMCL ignores grid-origin yaw, so changing YAML yaw alone is incorrect.
+   Rasterization can alter thin features by a cell; inspect walls afterward.
+   `registration.json` records `frame_mode`, root pose and transform; room
+   bundles make no field-position claim. Occupancy output is `field.pgm/yaml`
+   in both modes (a filename only). The source `map.posegraph/.data` remains
+   untouched in its **boot frame**; do not load it as a transformed field graph.
+
+5. Check and relaunch. `check` rejects occupied/unknown/out-of-bounds root cells
+   and prints the registration for human review. In RViz use fixed frame `map`
+   and verify wall/scan overlap, orientation and distances. Stop mapping first.
+   Keep the robot at the captured start, or return it there before localizing:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow check /workspaces/isaac_ros-dev/maps/room
+   ros2 run sentry_localization operator_workflow localize /workspaces/isaac_ros-dev/maps/room
+   ```
+
+   Room localization automatically keeps raw wheel passthrough and needs no
+   external start. For a field bundle, use `localize FIELD_DIR --odom-x FW_X
+   --odom-y FW_Y`: these are the firmware coordinates **at this relaunch**;
+   AMCL independently receives the registered measured field pose. A different
+   physical start requires a new registration/capture; never reuse a start
+   assumption after moving the robot. No route, firmware or odometry constant
+   changes are part of this workflow.
+
+6. Request a bounded parked convergence check in another terminal:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow convergence /workspaces/isaac_ros-dev/maps/room
+   ```
+
+   It requests `/request_nomotion_update` once per second, since stationary
+   scans otherwise do not update AMCL. Success needs at least five distinct,
+   fresh `/amcl_pose` stamps over five seconds, valid planar covariance (largest
+   xy std <=0.25 m, yaw std <=0.15 rad), pose near the captured/registered start
+   (0.4 m, 0.25 rad), fresh valid scans, and stamped map/root/lidar TF coverage.
+   Sensor stamps establish freshness; TF's future tolerance does not. Brief TF
+   delivery delay is allowed, never an unstamped/latest-TF substitute. Options
+   expose thresholds and timeout (60 s); these are operational gates, not
+   measured hardware accuracy. For the room rehearsal, keep the chassis parked
+   and slew the head with the existing operator controls during this longer check:
+
+   ```bash
+   ros2 run sentry_localization operator_workflow convergence /workspaces/isaac_ros-dev/maps/room --hold 30 --samples 20 --max-distance 0.15 --max-std 0.15
+   ```
+
+   Inspect scan overlap throughout. The distance gate compares AMCL with the
+   saved boot pose; it requires returning to that physical spot. A pass is
+   **filter convergence**, not proof of field truth or calibration.
+
+For simulation add `--sim-time` to `preflight`, `boot-pose`, `save` and
+`convergence`, and `real_hardware:=false` to mapping/localize. ROS operations
+have wall-clock timeouts even if simulation pauses. `preflight` is also
+available alone. The 2026-10-18 hardware scan had 340–361 beams with varying
+angular increment; this workflow fails clearly on that geometry and cannot
+repair the driver. Do not claim a usable map until a fixed stream passes.
+
+On any failed save/check/convergence, keep the robot parked, retain the source
+snapshot, inspect the error and scan/map overlay, and retry with a new output
+path after correcting the cause. Re-capture/remap if boot provenance is in
+doubt: timestamp ordering catches a backward clock but cannot identify every
+wrong-session boot file. If map localization remains unavailable, stop this
+stack and use the existing `auto.launch.py localization_mode:=none` fallback
+with the correct firmware navigation seed (or `use_rf2o:=false` for raw wheel
+passthrough). This supplies no map localization or field convergence claim.
+Do not compensate by changing movement routes, firmware starts or odometry.
+
+Offline regression checks: `python3 -m pytest test/test_operator_workflow.py`.
+The same suite is registered in `colcon test --packages-select
+sentry_localization`; runtime rehearsal additionally exercises ROS lifecycle,
+DDS discovery, clock ordering, serialization and parked scan updates.
 
 ## Saved map
 

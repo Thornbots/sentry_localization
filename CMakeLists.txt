@@ -55,6 +55,7 @@ install(TARGETS ${PROJECT_NAME}_core
   RUNTIME DESTINATION bin)
 install(TARGETS localization_backend passthrough_odom_publisher ekf_input_publisher map_pose_publisher map_autosaver
   DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/operator_workflow DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config map DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
@@ -63,6 +64,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_pep257 REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_operator_workflow test/test_operator_workflow.py TIMEOUT 30
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    ENV "PYTEST_ADDOPTS=-p no:anyio")
   ament_add_pytest_test(test_field_map test/test_field_map.py TIMEOUT 120
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     ENV "PYTEST_ADDOPTS=-p no:anyio")
