@@ -553,6 +553,19 @@ def test_alignment_defaults_and_typo_rejection(tmp_path):
         workflow.align(NS(source=source, output=tmp_path / "typo", x=-4.265, y=0, yaw=0, team=None))
 
 
+@pytest.mark.parametrize('room,next_step', [(True, 'prepare-room'), (False, 'align')])
+def test_saved_session_next_step_matches_frame(monkeypatch, tmp_path, capsys, room, next_step):
+    import sys
+
+    (tmp_path / 'session.json').write_text(json.dumps(dict(frame_mode='room' if room else 'field')))
+    monkeypatch.setattr(workflow, 'save', lambda args: None)
+    monkeypatch.setattr(sys, 'argv', ['operator_workflow', 'save', str(tmp_path)])
+    workflow.main()
+    output = capsys.readouterr().out
+    assert 'operator_workflow ' + next_step in output
+    assert 'MEASURED_X' not in output
+
+
 def test_red_map_accepts_live_blue_start():
     assert workflow.verify_start(dict(team="red", raw_odom=[-4.625, 0]),
                                  dict(team="blue", raw_odom=[4.625, 0])) == [4.625, 0, 0]

@@ -1222,7 +1222,7 @@ def main():
         if args.command != "preflight":
             next_step = {
                 "boot-pose": "save",
-                "save": "align",
+                "save": "prepare-room" if getattr(args, "room", False) else "align",
                 "align": "localize",
                 "prepare-room": "localize",
                 "check": "localize",
@@ -1231,7 +1231,7 @@ def main():
             }.get(args.command)
             if next_step:
                 suffix = (
-                    " --x MEASURED_X --y MEASURED_Y --yaw RADIANS"
+                    " --yaw RADIANS"
                     if next_step == "align"
                     else ""
                 )
