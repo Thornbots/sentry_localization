@@ -42,7 +42,7 @@ def metadata():
 @pytest.mark.parametrize(
     "boot,measured,heading,reported",
     [
-        ((-4.067, 0.002, 0), (-4.3, 0.2), math.pi, math.pi),
+        ((-4.067, 0.002, 0), (-4.3, 0.2), 0, 0),
         ((2, -1, 0.3), (4, 2), 1.2, -0.4),
         ((0, 0, 0), (0, 0), -math.pi, math.pi),
     ],
@@ -85,7 +85,15 @@ def make_bundle(tmp_path):
     for suffix in ("data", "posegraph"):
         (source / f"map.{suffix}").write_bytes(b"graph-data")
     (source / "boot.json").write_text(
-        json.dumps(dict(root=[2, 2, 0], chassis_yaw=math.pi))
+        json.dumps(
+            dict(
+                root=[2, 2, 0],
+                chassis_yaw=0,
+                team="red",
+                raw_odom=[-4.625, 0],
+                session_id="test-session",
+            )
+        )
     )
     return source
 
@@ -93,9 +101,7 @@ def make_bundle(tmp_path):
 def test_alignment_keeps_graph_boot_frame_and_seeds_root(tmp_path):
     source = make_bundle(tmp_path)
     output = tmp_path / "field"
-    workflow.align(
-        NS(source=source, output=output, x=-4.0, y=0.3, yaw=math.pi, team="red")
-    )
+    workflow.align(NS(source=source, output=output, x=-4.0, y=0.3, yaw=0, team="red"))
     manifest = workflow.check(output)
     assert manifest["initial_root"] == pytest.approx([-4, 0.3, 0])
     assert (source / "map.posegraph").read_bytes() == b"graph-data"
@@ -103,7 +109,7 @@ def test_alignment_keeps_graph_boot_frame_and_seeds_root(tmp_path):
     assert yaml.safe_load((output / "field.yaml").read_text())["origin"][2] == 0
     with pytest.raises(FileExistsError):
         workflow.align(
-            NS(source=source, output=output, x=-4.0, y=0.3, yaw=math.pi, team="red")
+            NS(source=source, output=output, x=-4.0, y=0.3, yaw=0, team="red")
         )
 
 
@@ -116,6 +122,25 @@ def test_missing_graph_and_boot_are_not_success(tmp_path):
     (source / "boot.json").unlink()
     with pytest.raises(FileNotFoundError):
         workflow.validate_bundle(source)
+
+
+def test_session_can_be_moved_as_one_directory(tmp_path):
+    session = tmp_path / "original"
+    session.mkdir()
+    source = make_bundle(session)
+    workflow.align(
+        NS(
+            source=source,
+            output=session / "deployment",
+            x=-4.625,
+            y=0,
+            yaw=0,
+            team=None,
+        )
+    )
+    moved = tmp_path / "moved"
+    session.rename(moved)
+    assert workflow.check(moved / "deployment")["team"] == "red"
 
 
 def scan(count=360):
@@ -184,29 +209,24 @@ def test_room_has_no_field_inputs_and_keeps_boot_coordinates(tmp_path):
 @pytest.mark.parametrize(
     "command,expected",
     [
-        (["mapping", "--room", "real_hardware:=false"], ["use_rf2o:=false"]),
+        (["mapping", "SESSION", "--room", "real_hardware:=false"], ["use_rf2o:=false"]),
         (
-            ["mapping", "--raw-odom", "--odom-x", "-5", "--odom-y", "0",
-             "real_hardware:=false"],
-            ["use_rf2o:=false", "initial_x:=-5.0"],
+            ["mapping", "SESSION", "--raw-odom", "real_hardware:=false"],
+            ["use_rf2o:=false", "seed_from_raw_odom:=true"],
         ),
         (
-            ["mapping", "--odom-x", "-4", "--odom-y", "0", "real_hardware:=false"],
-            ["use_rf2o:=true", "initial_x:=-4.0"],
+            ["mapping", "SESSION", "real_hardware:=false"],
+            ["use_rf2o:=true", "seed_from_raw_odom:=true", "autosave_map:=true"],
         ),
         (
             [
                 "localize",
                 "BUNDLE",
-                "--odom-x",
-                "-4",
-                "--odom-y",
-                "0",
                 "real_hardware:=false",
             ],
             [
                 "use_rf2o:=true",
-                "initial_x:=-4.0",
+                "seed_from_raw_odom:=true",
                 "amcl_initial_x:=-4.3",
                 "amcl_initial_yaw:=0.2",
             ],
@@ -214,11 +234,12 @@ def test_room_has_no_field_inputs_and_keeps_boot_coordinates(tmp_path):
     ],
 )
 def test_launch_cli_trailing_arguments_and_independent_seeds(
-    monkeypatch, command, expected
+    monkeypatch, tmp_path, command, expected
 ):
     import sys
 
     captured = []
+    command = [str(tmp_path / "session") if c == "SESSION" else c for c in command]
     monkeypatch.setattr(sys, "argv", ["operator_workflow", *command])
     monkeypatch.setattr(
         workflow,
@@ -227,11 +248,9 @@ def test_launch_cli_trailing_arguments_and_independent_seeds(
     )
     monkeypatch.setattr(workflow, "ensure_stack_stopped", lambda: None)
     monkeypatch.setattr(
-        workflow.subprocess, "call", lambda cmd: captured.extend(cmd) or 0
+        workflow, "run_stack", lambda args, session, cmd: captured.extend(cmd)
     )
-    with pytest.raises(SystemExit) as result:
-        workflow.main()
-    assert result.value.code == 0
+    workflow.main()
     assert "real_hardware:=false" in captured
     for value in expected:
         assert value in captured
@@ -246,21 +265,156 @@ def test_room_localize_no_odometry_seed_and_rejects_rf2o_override(monkeypatch):
     )
     monkeypatch.setattr(workflow, "ensure_stack_stopped", lambda: None)
     monkeypatch.setattr(
-        workflow.subprocess, "call", lambda cmd: captured.extend(cmd) or 0
+        workflow, "run_stack", lambda args, session, cmd: captured.extend(cmd)
     )
     monkeypatch.setattr(
         sys, "argv", ["operator_workflow", "localize", "BUNDLE", "real_hardware:=false"]
     )
-    with pytest.raises(SystemExit) as result:
-        workflow.main()
-    assert result.value.code == 0
+    workflow.main()
     assert "use_rf2o:=false" in captured
     assert "amcl_initial_x:=2" in captured
     captured.clear()
     monkeypatch.setattr(
-        sys, "argv", ["operator_workflow", "mapping", "--room", "use_rf2o:=true"]
+        sys,
+        "argv",
+        ["operator_workflow", "mapping", "SESSION", "--room", "use_rf2o:=true"],
     )
     with pytest.raises(SystemExit) as result:
         workflow.main()
     assert result.value.code == 1
     assert not captured
+
+
+@pytest.mark.parametrize(
+    "team,x,yaw,reported",
+    [
+        ("green", -4.625, 0, 0),
+        ("blue", -4.625, 0, 0),
+        ("red", 4.625, 0, 0),
+        ("red", 0, 0, 0),
+        ("red", -4.625, math.pi, 0),
+        ("red", -4.625, 180, 0),
+        ("red", -4.625, 0, math.pi),
+    ],
+)
+def test_field_rejects_team_sign_heading_and_degrees(team, x, yaw, reported):
+    boot = dict(team="red", raw_odom=[-4.625, 0], chassis_yaw=reported)
+    with pytest.raises(ValueError):
+        workflow.validate_field(boot, team, x, 0, yaw)
+
+
+@pytest.mark.parametrize("team,sign,heading", [("red", -1, 0), ("blue", 1, math.pi)])
+def test_registration_known_wall_in_field_coordinates(team, sign, heading):
+    boot = dict(team=team, raw_odom=[sign * 4.625, 0], chassis_yaw=heading)
+    workflow.validate_field(boot, team, sign * 4.5, 0.2, heading)
+    correction, _ = workflow.registration(
+        [sign * 4.625, 0, 0], sign * 4.5, 0.2, heading, heading
+    )
+    # A wall 1 m toward +x and 2 m toward +y from the parked root.
+    assert workflow.transform((sign * 4.625 + 1, 2), correction) == pytest.approx(
+        (sign * 4.5 + 1, 2.2)
+    )
+
+
+def test_stale_boot_or_not_returned_refused():
+    boot = dict(root=[-4.625, 0, 0], session_id="current")
+    workflow.verify_return(boot, [-4.625, 0, 0], "current")
+    with pytest.raises(ValueError, match="wrong-session"):
+        workflow.verify_return(boot, [-4.625, 0, 0], "old")
+    with pytest.raises(ValueError, match="return to boot"):
+        workflow.verify_return(boot, [-3, 0, 0], "current")
+
+
+def test_seed_mismatch_refused():
+    boot = dict(team="red", raw_odom=[-4.625, 0])
+    workflow.verify_start(boot, dict(boot))
+    with pytest.raises(ValueError, match="seed/team mismatch"):
+        workflow.verify_start(boot, dict(team="red", raw_odom=[0, 0]))
+    with pytest.raises(ValueError, match="seed/team mismatch"):
+        workflow.verify_start(boot, dict(team="blue", raw_odom=[-4.625, 0]))
+
+
+def test_blue_pi_allows_float32_serialization_noise():
+    yaw = float(np.float32(math.pi))
+    workflow.validate_field(
+        dict(team="blue", raw_odom=[4.625, 0], chassis_yaw=yaw), "blue", 4.625, 0, yaw
+    )
+
+
+def test_registration_places_known_wall_pixels():
+    meta = metadata()
+    meta.update(resolution=0.1, origin=[-5, -1, 0])
+    pixels = np.full((20, 30), 254, dtype=np.uint8)
+    pixels[:, 20] = 0  # Wall x=-2.95, cell centres from y=-0.95 through 0.95.
+    correction, _ = workflow.registration([-4.625, 0, 0], -4.5, 0.2, 0, 0)
+    output, raster = workflow.rotate_grid(meta, pixels, correction)
+    rows, cols = np.where(raster == 0)
+    assert len(cols) == 20
+    assert output["origin"][0] + (cols + 0.5) * 0.1 == pytest.approx(
+        np.full(20, -2.825)
+    )
+    ys = output["origin"][1] + (raster.shape[0] - rows - 0.5) * 0.1
+    assert sorted(ys) == pytest.approx(np.arange(-0.75, 1.2, 0.1))
+
+
+def test_negative_scientific_yaw_parses(monkeypatch, tmp_path):
+    import sys
+
+    captured = []
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "operator_workflow",
+            "align",
+            str(tmp_path),
+            "--x",
+            "-4.625",
+            "--y",
+            "0",
+            "--yaw",
+            "-2e-05",
+        ],
+    )
+    monkeypatch.setattr(workflow, "align", lambda args: captured.append(args.yaw))
+    workflow.main()
+    assert captured == [-2e-05]
+
+
+@pytest.mark.parametrize("option", ["--odom-x", "--odom-y"])
+def test_operator_seed_removed(monkeypatch, option):
+    import sys
+
+    monkeypatch.setattr(
+        sys, "argv", ["operator_workflow", "mapping", "SESSION", option, "99"]
+    )
+    with pytest.raises(SystemExit) as result:
+        workflow.main()
+    assert result.value.code == 2
+
+
+def test_failed_localize_stops_owned_launch_without_pass(monkeypatch, tmp_path, capsys):
+    import subprocess
+    import sys
+
+    processes = []
+    real_popen = subprocess.Popen
+
+    def launch(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def fail(_args):
+        raise RuntimeError("away from registered start")
+
+    monkeypatch.setattr(workflow.subprocess, "Popen", launch)
+    monkeypatch.setattr(workflow, "convergence", fail)
+    with pytest.raises(RuntimeError, match="away from registered start"):
+        workflow.run_stack(
+            NS(command="localize"),
+            tmp_path,
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+        )
+    assert processes[0].poll() is not None
+    assert "LOCALIZE PASS" not in capsys.readouterr().out

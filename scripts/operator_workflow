@@ -13,6 +13,11 @@ import argparse
 from collections import deque
 import json
 import math
+import os
+import re
+import signal
+import sys
+import uuid
 from pathlib import Path
 import shutil
 import subprocess
@@ -44,6 +49,39 @@ def registration(boot_root, x, y, yaw, boot_chassis_yaw):
     rotation = angle(field_yaw - boot_root[2])
     offset = transform(boot_root[:2], (0, 0, rotation))
     return (x - offset[0], y - offset[1], rotation), (x, y, field_yaw)
+
+
+def validate_field(boot, team, x, y, yaw):
+    """Reject symmetric but physically inconsistent field registrations."""
+    if team not in ("red", "blue") or team != boot["team"]:
+        raise ValueError("team disagrees with captured referee team")
+    # Float32 telemetry can place a valid +/-pi heading just beyond double pi.
+    if not all(math.isfinite(v) for v in (x, y, yaw)) or abs(yaw) > math.pi + 1e-6:
+        raise ValueError("yaw must be radians in [-pi, pi], never degrees")
+    if (x < 0) != (team == "red") or x == 0:
+        raise ValueError("field x must be negative for red, positive for blue")
+    raw = boot["raw_odom"]
+    if len(raw) != 2 or not all(math.isfinite(v) for v in raw):
+        raise ValueError("invalid captured raw /odom")
+    if (raw[0] < 0) != (team == "red") or raw[0] == 0:
+        raise ValueError("raw /odom sign disagrees with referee team; reboot correctly")
+    if abs(angle(yaw - boot["chassis_yaw"])) > 0.25:
+        raise ValueError("field_yaw must be near zero: check team and chassis heading")
+
+
+def verify_return(boot, current, session_id):
+    """Saving requires the same live mapping session and a parked return to boot."""
+    if boot.get("session_id") != session_id:
+        raise ValueError("wrong-session boot pose; recapture before mapping")
+    if not all(math.isfinite(v) for v in [*boot["root"], *current]):
+        raise ValueError("nonfinite boot/current root pose")
+    if (
+        math.dist(boot["root"][:2], current[:2]) > 0.15
+        or abs(angle(boot["root"][2] - current[2])) > 0.15
+    ):
+        raise ValueError(
+            f"return to boot before save: observed={current}, expected={boot['root']}"
+        )
 
 
 def read_map(base):
@@ -118,6 +156,8 @@ def validate_bundle(directory):
         math.isfinite(v) for v in [*boot["root"], boot["chassis_yaw"]]
     ):
         raise ValueError("invalid captured boot pose")
+    if not boot.get("session_id") or boot.get("team") not in ("red", "blue"):
+        raise ValueError("boot capture lacks session ID or referee team; recapture")
 
 
 def align(args):
@@ -125,6 +165,8 @@ def align(args):
     source, target = Path(args.source).resolve(), Path(args.output).resolve()
     validate_bundle(source)
     boot = json.loads((source / "boot.json").read_text())
+    args.team = args.team or boot["team"]
+    validate_field(boot, args.team, args.x, args.y, args.yaw)
     correction, root = registration(
         boot["root"], args.x, args.y, args.yaw, boot["chassis_yaw"]
     )
@@ -135,9 +177,10 @@ def align(args):
     (target / "field.yaml").write_text(yaml.safe_dump(meta))
     manifest = dict(
         version=1,
+        session_id=boot["session_id"],
         frame_mode="field",
         team=args.team,
-        source=str(source),
+        source=os.path.relpath(source, target),
         boot_root=boot["root"],
         measured_chassis_yaw=args.yaw,
         boot_chassis_yaw=boot["chassis_yaw"],
@@ -161,7 +204,7 @@ def prepare_room(args):
     manifest = dict(
         version=1,
         frame_mode="room",
-        source=str(source),
+        source=os.path.relpath(source, target),
         field_from_boot=[0.0, 0.0, 0.0],
         initial_root=boot["root"],
     )
@@ -173,7 +216,28 @@ def check(directory):
     """Check saved artifacts and root occupancy; print the transform for human review."""
     directory = Path(directory)
     manifest = json.loads((directory / "registration.json").read_text())
-    validate_bundle(manifest["source"])
+    source = directory / manifest["source"]
+    validate_bundle(source)
+    boot = json.loads((source / "boot.json").read_text())
+    if manifest.get("frame_mode") == "field":
+        validate_field(
+            boot,
+            manifest["team"],
+            *manifest["initial_root"][:2],
+            manifest["measured_chassis_yaw"],
+        )
+        if manifest.get("session_id") != boot.get("session_id"):
+            raise ValueError("registration session differs from boot capture")
+        correction, root = registration(
+            boot["root"],
+            *manifest["initial_root"][:2],
+            manifest["measured_chassis_yaw"],
+            boot["chassis_yaw"],
+        )
+        if not np.allclose(root, manifest["initial_root"]) or not np.allclose(
+            correction, manifest["field_from_boot"]
+        ):
+            raise ValueError("registration pose/transform disagrees with boot evidence")
     meta, pixels = read_map(directory / "field")
     if meta["origin"][2] != 0:
         raise ValueError("AMCL field map must have zero origin yaw")
@@ -297,6 +361,7 @@ def capture_boot(args):
     listener = TransformListener(buffer, runtime.node)
     samples = []
     pending = deque(maxlen=300)
+    live = observe_inputs(runtime, args)
 
     def receive(message):
         pending.append(message)
@@ -320,7 +385,7 @@ def capture_boot(args):
                 "map", "root", Time.from_msg(message.header.stamp)
             )
         except TransformException:
-            return
+            return False
         p, q = tf.transform.translation, tf.transform.rotation
         yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
         chassis = message.position[message.name.index("chassis_yaw")]
@@ -336,7 +401,12 @@ def capture_boot(args):
         runtime.subscriptions.append(
             runtime.node.create_subscription(JointState, "/joint_states", receive, 20)
         )
-        runtime.wait(collect, args.timeout)
+        try:
+            runtime.wait(collect, args.timeout)
+        except RuntimeError as error:
+            raise RuntimeError(
+                "boot-pose timeout: need stamped map->root TF and fresh chassis_yaw"
+            ) from error
         first = samples[0]
         if any(
             math.hypot(s["root"][0] - first["root"][0], s["root"][1] - first["root"][1])
@@ -348,7 +418,7 @@ def capture_boot(args):
             raise ValueError(
                 "boot capture moved >3 cm/0.03 rad; park and retry before mapping"
             )
-        result = dict(samples[-1], geometry=geometry.tolist())
+        result = dict(samples[-1], geometry=geometry.tolist(), **live)
         if not all(math.isfinite(v) for v in [*result["root"], result["chassis_yaw"]]):
             raise ValueError("nonfinite boot pose")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -358,6 +428,99 @@ def capture_boot(args):
     finally:
         del listener
         runtime.close()
+
+
+def observe_inputs(runtime, args, require_session=True):
+    """Capture fresh raw odometry, referee team and live supervisor session."""
+    from nav_msgs.msg import Odometry
+    from dji_serial_bridge.msg import RefSysStatus
+    from std_msgs.msg import String
+    from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy
+
+    state = {}
+
+    def odom(message):
+        stamp = message.header.stamp.sec * 10**9 + message.header.stamp.nanosec
+        age = (runtime.node.get_clock().now().nanoseconds - stamp) / 1e9
+        p = message.pose.pose.position
+        if 0 <= age <= args.max_age and all(math.isfinite(v) for v in (p.x, p.y)):
+            state["raw_odom"] = [p.x, p.y]
+
+    def referee(message):
+        if message.robot_id:
+            state["team"] = "blue" if message.is_on_blue_team else "red"
+
+    streams = [
+        (Odometry, "/odom", odom, qos_profile_sensor_data),
+        (RefSysStatus, "/dji_serial_bridge/ref_sys", referee, qos_profile_sensor_data),
+    ]
+    if require_session:
+        streams.append(
+            (
+                String,
+                "/operator_workflow/session",
+                lambda m: state.update(session_id=m.data),
+                QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+            )
+        )
+    for message_type, topic, callback, qos in streams:
+        runtime.subscriptions.append(
+            runtime.node.create_subscription(message_type, topic, callback, qos)
+        )
+    try:
+        runtime.wait(lambda: len(state) == len(streams), args.timeout)
+    except RuntimeError as error:
+        raise RuntimeError(
+            f"timeout waiting for raw /odom, referee team, live session; received {list(state)}"
+        ) from error
+    return state
+
+
+def verify_start(boot, live):
+    """Never localize a carried map with another team's or start's raw seed."""
+    if (
+        live["team"] != boot["team"]
+        or math.dist(live["raw_odom"], boot["raw_odom"]) > 0.4
+    ):
+        raise ValueError(
+            f"seed/team mismatch: observed={live}, expected team={boot['team']} raw_odom={boot['raw_odom']}; return to registered start"
+        )
+
+
+def current_root(runtime, args):
+    """Get a fresh map->root pose, never a stale cached transform."""
+    from tf2_ros import Buffer, TransformListener, TransformException
+    from rclpy.time import Time
+
+    buffer = Buffer()
+    listener = TransformListener(buffer, runtime.node)
+    result = []
+
+    def collect():
+        try:
+            tf = buffer.lookup_transform("map", "root", Time())
+        except TransformException:
+            return False
+        stamp = tf.header.stamp.sec * 10**9 + tf.header.stamp.nanosec
+        if abs(runtime.node.get_clock().now().nanoseconds - stamp) / 1e9 > args.max_age:
+            return False
+        p, q = tf.transform.translation, tf.transform.rotation
+        result[:] = [
+            p.x,
+            p.y,
+            math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
+        ]
+        return True
+
+    try:
+        runtime.wait(collect, args.timeout)
+        return result
+    except RuntimeError as error:
+        raise RuntimeError(
+            "timeout waiting for fresh map->root TF; stay parked and check stack"
+        ) from error
+    finally:
+        del listener
 
 
 def save(args):
@@ -375,6 +538,8 @@ def save(args):
     try:
         geometry = preflight(runtime, args)
         boot = json.loads(Path(args.boot).read_text())
+        live = observe_inputs(runtime, args)
+        verify_return(boot, current_root(runtime, args), live["session_id"])
         if not geometry_matches(np.array(boot["geometry"]), geometry):
             raise ValueError("scan geometry differs from boot capture")
         shutil.copyfile(args.boot, stage / "boot.json")
@@ -478,6 +643,13 @@ def convergence(args):
     def receive(message):
         stamp = message.header.stamp.sec * 10**9 + message.header.stamp.nanosec
         now = runtime.node.get_clock().now().nanoseconds
+        p = message.pose.pose
+        q = p.orientation
+        state["observed"] = [
+            p.position.x,
+            p.position.y,
+            math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z)),
+        ]
         if stamp == state["stamp"]:
             return
         valid = (
@@ -593,8 +765,29 @@ def convergence(args):
 
     try:
         reference = preflight(runtime, args)
+        if manifest.get("frame_mode") == "field":
+            boot = json.loads(
+                (Path(args.directory) / manifest["source"] / "boot.json").read_text()
+            )
+            verify_start(boot, observe_inputs(runtime, args, require_session=False))
         state["geometry"] = reference
-        runtime.wait(ready, args.timeout)
+        try:
+            runtime.wait(ready, args.timeout)
+        except RuntimeError as error:
+            observed = state.get("observed")
+            expected = manifest["initial_root"]
+            away = observed and (
+                math.dist(observed[:2], expected[:2]) > args.max_distance
+                or abs(angle(observed[2] - expected[2])) > args.max_yaw
+            )
+            reason = (
+                "away from registered start; return and park"
+                if away
+                else "fresh covariance/scan/TF gates did not pass"
+            )
+            raise RuntimeError(
+                f"convergence timeout: {reason}; observed={observed}, expected={expected}"
+            ) from error
         print(
             "CONVERGED: fresh AMCL covariance/pose, scan and TF gates passed; "
             "confirm scan-wall agreement in RViz before use. This is not ground-truth accuracy."
@@ -633,40 +826,124 @@ def ensure_stack_stopped():
         runtime.close()
 
 
+def run_stack(args, session, launch):
+    """Supervise the launch, retain backups and stop the whole owned process group."""
+    runtime = None
+    process = None
+    old_handlers = {}
+
+    def stop(signum, _frame):
+        if (
+            args.command == "mapping"
+            and not (session / "snapshot" / "map.posegraph").exists()
+        ):
+            print(
+                f"WARNING: UNSAVED mapping stop. Backup: {session / 'backup'}; explicit save has not passed.",
+                flush=True,
+            )
+        if process is not None and process.poll() is None:
+            os.killpg(process.pid, signum)
+
+    try:
+        if args.command == "mapping":
+            from std_msgs.msg import String
+            from rclpy.qos import QoSProfile, DurabilityPolicy
+
+            runtime = Runtime(args.sim_time)
+            session_id = str(uuid.uuid4())
+            (session / "session.json").write_text(
+                json.dumps(dict(session_id=session_id))
+            )
+            publisher = runtime.node.create_publisher(
+                String,
+                "/operator_workflow/session",
+                QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+            )
+            publisher.publish(String(data=session_id))
+        process = subprocess.Popen(launch, start_new_session=True)
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            old_handlers[signum] = signal.signal(signum, stop)
+        if args.command == "localize":
+            for name, value in dict(
+                max_std=0.25,
+                max_yaw_std=0.15,
+                max_distance=0.4,
+                max_yaw=0.25,
+                hold=5.0,
+                samples=5,
+            ).items():
+                setattr(args, name, value)
+            convergence(args)
+            if process.poll() is not None:
+                raise RuntimeError("robot launch stopped before parked gates completed")
+            print(
+                "LOCALIZE PASS: parked gates passed; verify scan/wall overlap before use.",
+                flush=True,
+            )
+            print(
+                f"NEXT: keep this terminal running; stop with Ctrl-C when finished. Session: {session}",
+                flush=True,
+            )
+        else:
+            print(
+                f"NEXT (second terminal, before moving): ros2 run sentry_localization operator_workflow boot-pose {session}",
+                flush=True,
+            )
+        while process.poll() is None:
+            if runtime:
+                runtime.ros.spin_once(runtime.node, timeout_sec=0.1)
+            else:
+                time.sleep(0.1)
+        if process.returncode:
+            raise RuntimeError(f"robot launch exited {process.returncode}")
+    finally:
+        if process is not None and process.poll() is None:
+            os.killpg(process.pid, signal.SIGINT)
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+        for signum, handler in old_handlers.items():
+            signal.signal(signum, handler)
+        if runtime:
+            runtime.close()
+
+
 def main():
     """Dispatch explicit operator steps; launch always uses the existing robot entrypoint."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     mapping = commands.add_parser("mapping")
     mapping.add_argument("--room", action="store_true")
-    mapping.add_argument("--raw-odom", action="store_true",
-                         help="Use wheel odometry directly instead of rf2o/EKF")
-    mapping.add_argument("--odom-x", type=float)
-    mapping.add_argument("--odom-y", type=float)
+    mapping.add_argument(
+        "--raw-odom",
+        action="store_true",
+        help="Use wheel odometry directly instead of rf2o/EKF",
+    )
+    mapping.add_argument("session")
     mapping.add_argument("launch_args", nargs="*")
     saving = commands.add_parser("save")
     saving.add_argument("output")
-    saving.add_argument("--boot", required=True)
     booting = commands.add_parser("boot-pose")
     booting.add_argument("output")
     preflighting = commands.add_parser("preflight")
     alignment = commands.add_parser("align")
     alignment.add_argument("source")
-    alignment.add_argument("output")
-    alignment.add_argument("--team", required=True, choices=["red", "blue"])
+    alignment.add_argument("--team", choices=["red", "blue"])
     for name in ("x", "y", "yaw"):
         alignment.add_argument("--" + name, type=float, required=True)
     room = commands.add_parser("prepare-room")
     room.add_argument("source")
-    room.add_argument("output")
     checking = commands.add_parser("check")
     checking.add_argument("directory")
     localizing = commands.add_parser("localize")
     localizing.add_argument("directory")
-    localizing.add_argument("--raw-odom", action="store_true",
-                            help="Use wheel odometry directly instead of rf2o/EKF")
-    localizing.add_argument("--odom-x", type=float)
-    localizing.add_argument("--odom-y", type=float)
+    localizing.add_argument(
+        "--raw-odom",
+        action="store_true",
+        help="Use wheel odometry directly instead of rf2o/EKF",
+    )
     localizing.add_argument("launch_args", nargs="*")
     monitoring = commands.add_parser("convergence")
     monitoring.add_argument("directory")
@@ -676,13 +953,37 @@ def main():
     monitoring.add_argument("--max-yaw", type=float, default=0.25)
     monitoring.add_argument("--hold", type=float, default=5.0)
     monitoring.add_argument("--samples", type=int, default=5)
-    for command in (saving, monitoring, booting, preflighting):
+    for command in (saving, monitoring, booting, preflighting, mapping, localizing):
         command.add_argument("--sim-time", action="store_true")
         command.add_argument("--timeout", type=float, default=60.0)
         command.add_argument(
             "--max-age", type=float, default=3.0 if command == monitoring else 30.0
         )
-    args, trailing = parser.parse_known_args()
+    # Attach negative scientific values to their option; argparse otherwise sees flags.
+    tokens = list(sys.argv[1:])
+    for index in range(len(tokens) - 2, -1, -1):
+        if tokens[index] in ("--x", "--y", "--yaw") and re.fullmatch(
+            r"-\d*\.?\d+[eE][+-]?\d+", tokens[index + 1]
+        ):
+            tokens[index : index + 2] = [tokens[index] + "=" + tokens[index + 1]]
+    args, trailing = parser.parse_known_args(tokens)
+    session = Path(
+        getattr(
+            args,
+            "session",
+            getattr(
+                args, "source", getattr(args, "directory", getattr(args, "output", "."))
+            ),
+        )
+    ).resolve()
+    if args.command in ("align", "prepare-room"):
+        args.source, args.output = session / "snapshot", session / "deployment"
+    elif args.command == "save":
+        args.output, args.boot = session / "snapshot", session / "boot.json"
+    elif args.command == "boot-pose":
+        args.output = session / "boot.json"
+    elif args.command in ("check", "localize", "convergence"):
+        args.directory = session / "deployment"
     if trailing:
         if args.command not in ("mapping", "localize") or any(
             "  " in a or ":=" not in a for a in trailing
@@ -740,46 +1041,59 @@ def main():
                 "amcl_initial_x",
                 "amcl_initial_y",
                 "amcl_initial_yaw",
+                "seed_from_raw_odom",
+                "map_save_dir",
             }
             if any(value.split(":=")[0] in protected for value in extra):
                 raise ValueError("workflow-owned launch arguments cannot be overridden")
             launch = ["ros2", "launch", "thornbots_pkg", "auto.launch.py"]
             if args.command == "mapping":
-                if not args.room and (args.odom_x is None or args.odom_y is None):
-                    raise ValueError(
-                        "field mapping requires --odom-x/y; room rehearsal uses --room"
-                    )
+                session.mkdir(parents=True, exist_ok=False)
                 launch += [
                     "localization_mode:=mapping",
                     "load_map:=false",
-                    "autosave_map:=false",
-                    f"initial_x:={args.odom_x or 0.0}",
-                    f"initial_y:={args.odom_y or 0.0}",
+                    "autosave_map:=true",
+                    f"map_save_dir:={session / 'backup'}",
+                    "seed_from_raw_odom:=true",
                     f"use_rf2o:={str(not (args.room or args.raw_odom)).lower()}",
                 ]
             else:
                 manifest = check(args.directory)
                 room_mode = manifest.get("frame_mode") == "room"
-                if not room_mode and (args.odom_x is None or args.odom_y is None):
-                    raise ValueError(
-                        "field localization requires --odom-x/y in firmware coordinates"
-                    )
                 x, y, yaw = manifest["initial_root"]
                 launch += [
                     "localization_mode:=amcl",
                     "autosave_map:=false",
                     f"map_file:={Path(args.directory).resolve() / 'field'}",
-                    f"initial_x:={args.odom_x or 0.0}",
-                    f"initial_y:={args.odom_y or 0.0}",
+                    "seed_from_raw_odom:=true",
                     f"use_rf2o:={str(not (room_mode or args.raw_odom)).lower()}",
                     f"amcl_initial_x:={x}",
                     f"amcl_initial_y:={y}",
                     f"amcl_initial_yaw:={yaw}",
                 ]
             ensure_stack_stopped()
-            raise SystemExit(subprocess.call(launch + extra))
+            run_stack(args, session, launch + extra)
+        if args.command != "preflight":
+            next_step = {
+                "boot-pose": "save",
+                "save": "align",
+                "align": "localize",
+                "prepare-room": "localize",
+                "check": "localize",
+                "convergence": "check",
+            }.get(args.command)
+            if next_step:
+                suffix = (
+                    " --x MEASURED_X --y MEASURED_Y --yaw RADIANS"
+                    if next_step == "align"
+                    else ""
+                )
+                print(
+                    f"NEXT: ros2 run sentry_localization operator_workflow {next_step} {session}{suffix}"
+                )
     except (ValueError, RuntimeError, OSError, KeyError) as error:
-        parser.exit(1, f"FAILED: {error}\n")
+        verdict = "LOCALIZE FAIL" if args.command == "localize" else "FAILED"
+        parser.exit(1, f"{verdict}: {error}\n")
 
 
 if __name__ == "__main__":

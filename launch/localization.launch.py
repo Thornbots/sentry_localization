@@ -179,9 +179,14 @@ def generate_launch_description():
     )
 
     def make_ekf(context):
+        seeded = context.launch_configurations['seed_from_raw_odom'].lower() == 'true'
+        initial = {} if seeded else {'initial_state': [
+            float(context.launch_configurations['initial_x']),
+            float(context.launch_configurations['initial_y'])] + [0.0] * 13}
         node = Node(
-            package='robot_localization',
-            executable='ekf_node',
+            package='sentry_localization' if seeded else 'robot_localization',
+            executable='seeded_ekf' if seeded else 'ekf_node',
+            arguments=['--seed-use-sim-time', use_sim_time] if seeded else [],
             name='ekf_filter_node',
             output='screen',
             condition=IfCondition(ekf_selected),
@@ -196,9 +201,7 @@ def generate_launch_description():
                     # config/ekf.yaml's comment on world_frame.
                     'world_frame': LaunchConfiguration('odom_frame'),
                     'publish_tf': False,
-                    'initial_state': [
-                        float(context.launch_configurations['initial_x']),
-                        float(context.launch_configurations['initial_y'])] + [0.0] * 13,
+                    **initial,
                 },
             ],
         )
@@ -308,6 +311,10 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
+            'seed_from_raw_odom', default_value='false', choices=['true', 'false'],
+            description='Wait up to 15 wall seconds for fresh raw /odom before starting '
+            'EKF; use its x/y instead of initial_x/y. Requires use_rf2o:=true.'),
+        DeclareLaunchArgument(
             'initial_x', default_value='0.0',
             description='Initial firmware navigation X for EKF, meters'),
         DeclareLaunchArgument(
@@ -316,7 +323,8 @@ def generate_launch_description():
         DeclareLaunchArgument('amcl_initial_x', default_value=LaunchConfiguration('initial_x'),
                               description='AMCL field X; independent of EKF navigation seed'),
         DeclareLaunchArgument('amcl_initial_y', default_value=LaunchConfiguration('initial_y'),
-                              description='AMCL field Y; independent of EKF navigation seed'),
+                              description='AMCL field Y; defaults to initial_y, '
+                              'independent of EKF navigation seed'),
         DeclareLaunchArgument('amcl_initial_yaw', default_value='0.0',
                               description='Field root yaw, not chassis joint yaw, radians'),
         use_sim_time_arg,
