@@ -429,9 +429,11 @@ the robot; discovery cannot detect a stack hidden in another domain.
    `nav_odom`; it avoids an unknown EKF seed and is a rehearsal mode, not an
    rf2o accuracy test. `--raw-odom` selects that same input for field mapping or
    localization. Without it, field mode uses rf2o/EKF with the supplied seed.
-   The field rehearsal exposed severe mapping divergence with rf2o/EKF; raw
-   wheel input avoids stacking its lidar corrections with SLAM's. This does
-   not remove the need to assess wheel slip and mapping quality on hardware.
+   The field rehearsal exposed severe mapping divergence on a broad circuit
+   with either input. Raw wheel input passed a flat central circuit; it avoids
+   stacking lidar odometry corrections with SLAM's but does not cure terrain
+   tilt, wheel slip or poor geometry. Inspect coverage and loop closure; the
+   validated central circuit produced a partial map, not full-field coverage.
 
 2. **Before driving**, park the chassis and head, then in another terminal:
 
