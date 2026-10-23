@@ -32,7 +32,8 @@ target_include_directories(${PROJECT_NAME}_core PUBLIC
 add_executable(passthrough_odom_publisher src/passthrough_odom_publisher.cpp)
 add_executable(localization_backend src/localization_backend.cpp)
 ament_target_dependencies(localization_backend
-  rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox)
+  rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox
+  sensor_msgs tf2 tf2_ros)
 # slam_toolbox exports its backend libraries separately from its rosidl targets.
 target_link_libraries(localization_backend ${slam_toolbox_LIBRARIES} Boost::serialization TBB::tbb)
 ament_target_dependencies(passthrough_odom_publisher nav_msgs rclcpp)
@@ -55,6 +56,7 @@ install(TARGETS ${PROJECT_NAME}_core
   RUNTIME DESTINATION bin)
 install(TARGETS localization_backend passthrough_odom_publisher ekf_input_publisher map_pose_publisher map_autosaver
   DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/operator_workflow scripts/seeded_ekf DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config map DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
@@ -63,6 +65,12 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_pep257 REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_seeded_ekf test/test_seeded_ekf.py TIMEOUT 30
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    ENV "PYTEST_ADDOPTS=-p no:anyio")
+  ament_add_pytest_test(test_operator_workflow test/test_operator_workflow.py TIMEOUT 30
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    ENV "PYTEST_ADDOPTS=-p no:anyio")
   ament_add_pytest_test(test_field_map test/test_field_map.py TIMEOUT 120
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     ENV "PYTEST_ADDOPTS=-p no:anyio")

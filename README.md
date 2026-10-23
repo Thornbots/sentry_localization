@@ -21,12 +21,9 @@ for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
   0.02 m std gate it never passes (2026-10-02, sim: amcl 0.17-0.30 m,
   mapping 0.05-0.08 m).
 
-`thornbots_pkg/launch/auto.launch.py` includes `launch/localization.launch.py`
-and forwards its args. Standalone, for testing:
-
-```bash
-ros2 launch sentry_localization localization.launch.py localization_mode:=amcl
-```
+`thornbots_pkg/launch/auto.launch.py` includes `launch/localization.launch.py`.
+Use that robot entrypoint; do not run a second localization launch alongside it.
+The [operator workflow](#field-day-and-room-workflow) wraps the same entrypoint.
 
 `localization_mode` picks the `map->nav_odom` owner:
 
@@ -77,7 +74,7 @@ Other args:
   find `/map` within 2 s, and on the sentry mostly didn't. Load one back
   with `load_map:=true map_file:=<dir>/map`. Saved-map startup currently
   hard-codes `map_start_pose` to `[0, 0, 0]`; `initial_x`/`initial_y` seed
-  EKF and AMCL only. Loading at a nonzero field spawn still needs
+  EKF and, by default, AMCL only. Loading at a nonzero field spawn still needs
   [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
 
 Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_pose_publisher` (math in
@@ -190,6 +187,16 @@ points on every pyramid level read as zero motion.
 
 ### config/amcl.yaml
 
+**Tracked lidar mount.** nav2_amcl (Jazzy) caches each scan frame's
+`root->lidar` x/y at its first scan and re-reads only the mount yaw per scan.
+The head-mounted lidar sits about 0.22 m off root's yaw axis, so `localization_backend`
+runs `TrackedMountAmcl`, which refreshes that x/y from TF at each scan stamp
+before AMCL's own callback. `root` stays AMCL's base, so seeds and `/amcl_pose`
+keep their meaning. Parked checks cannot see this bug, since parked AMCL adds no
+motion noise; a head-sweeping drive can. Measurements are in the
+[full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.md#amcl-moving-mount).
+It relies on AmclNode's protected members; recheck it after a nav2 upgrade.
+
 `robot_model_type` is `nav2_amcl::OmniMotionModel`, with its strafe noise
 term, since the chassis is holonomic (it translates without turning).
 
@@ -281,14 +288,27 @@ from earlier scenarios are candidates. Kept for the isolated gain. Confirm
 
 ### config/slam.yaml
 
+**base_frame: lidar** (was `root`). slam_toolbox 2.8.5 caches each scan frame's
+mounting transform when it first sees that frame. Our lidar moves with the head
+relative to heading-fixed `root`; a fixed cached mount interprets head motion as
+robot motion. Using the sensor itself as SLAM's tracking base makes that cached
+transform identity. The stamped `nav_odom->lidar` lookup carries the head's yaw
+and offset on every scan; `map->nav_odom` still corrects the public root pose.
+AMCL and rf2o keep their `root` base and refresh the moving mount each scan
+([AMCL](#configamclyaml)). This does not compensate physical scan
+tilt or height changes missing from the planar TF tree. See the
+[full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.md).
+Start a new mapping session after this change; do not resume a serialized graph
+created with the old root tracking base.
+
 **minimum_travel_distance: 0.1** (was 0.5). A jerk (slip, bump, collision;
 see `sim/src/pose_emulator.cpp`'s `trigger_jerk`) is invisible to wheel
 odometry, so a slow or stopped robot never travelled 0.5m, slam_toolbox never
 matched a new scan, and `map->odom` froze. Live check: a stationary
 `trigger_jerk` got no update in 30s at 0.5, while `/cmd_vel` motion updated
 normally. 0.1m is two cells, cheap enough and prompt.
-`minimum_travel_heading` stays 0.05 rather than 0 to avoid exact-zero
-comparisons; heading never changes anyway.
+`minimum_travel_heading: 0.05` also admits scans as the lidar/head rotates,
+including a parked coverage sweep.
 
 **min_laser_range: 0.15** (slam.yaml and amcl.yaml `laser_min_range`). The
 RPLIDAR A2M8's minimum is 0.05 m (real scans report `range_min` 0.05), so 0.15
@@ -388,11 +408,185 @@ correction and slam_toolbox's correction stack on the same lidar data.
 
 ### Initial field position
 
-`auto.launch.py initial_x:=4.625 initial_y:=0.0` seeds the EKF and AMCL
-at a known team spawn; the default stays `(0, 0)`. `root` remains heading-fixed.
-Scan odometry initializes from the first `/odom` pose so it shares the
-firmware's origin. Starting the EKF at zero with a nonzero firmware pose
-would otherwise make `mcb_relay` immediately reset the firmware to zero.
+For direct launches, `initial_x/y` seed the navigation EKF in firmware odometry coordinates. AMCL
+uses independent `amcl_initial_x/y/yaw`; x/y default to `initial_x/y`, yaw to
+zero for compatibility. A measured field start belongs only in AMCL. Feeding
+it to EKF can make `mcb_relay` reset firmware navigation to the wrong position.
+Raw odometry and its constants remain unchanged. `root` has identity raw yaw;
+chassis heading is the separate `chassis_yaw` joint. Field root yaw is measured
+chassis heading minus the captured boot chassis heading, not chassis heading
+itself. Team never mirrors coordinates implicitly.
+
+On a different field, the measured start may differ from firmware `START_X` /
+`START_Y`. The [operator workflow](#field-day-and-room-workflow) enables
+`seed_from_raw_odom:=true`, deriving the navigation seed from fresh raw odometry
+before EKF starts; it does not accept a hand-entered seed. Register the map with
+the measured physical pose. This changes only
+map localization. It does not relocate raw CV aim, firmware routes or waypoints;
+the team must match those assumptions separately before autonomous use.
+
+## Field-day and room workflow
+
+### Field-day card — keep the robot parked at its start for steps 2, 4 and 5
+
+1. Stop the existing robot service/launch. In a sourced robot-container terminal,
+   choose a **new** session and start mapping (keep this terminal open):
+   `export SESSION=/workspaces/isaac_ros-dev/maps/oct31-red-01`
+   then `ros2 run sentry_localization operator_workflow mapping "$SESSION"`.
+2. In a second terminal, set the same `SESSION`, then capture **before moving**:
+   `ros2 run sentry_localization operator_workflow boot-pose "$SESSION"`.
+3. Map with existing operator controls, covering the whole field
+   ([broad-field coverage](#broad-field-coverage)). Before crossing rough or
+   raised ground: `ros2 run sentry_localization operator_workflow pause "$SESSION"`.
+   Stop on level ground, let the chassis settle, then `... resume "$SESSION"`
+   and sweep the head while parked. Return to the captured start, park the
+   chassis and head, and inspect coverage/loop closure and scan/wall overlap.
+   Save **before stopping mapping**:
+   `ros2 run sentry_localization operator_workflow save "$SESSION"`.
+4. Register the boot chassis heading in radians. Team comes from
+   the captured referee message. **Red**, facing +x:
+   `ros2 run sentry_localization operator_workflow align "$SESSION" --yaw 0`.
+   **Blue**, facing -x (use `oct31-blue-01` as the session in step 1):
+   `ros2 run sentry_localization operator_workflow align "$SESSION" --yaw 3.141592653589793`.
+   x/y default to the team's contract start. Optional surveyed `--x`/`--y`
+   refinements must stay within 0.3 m of captured raw odometry. Never enter degrees.
+5. Stop mapping with Ctrl-C. Park at the live team's contract start. Run:
+   `ros2 run sentry_localization operator_workflow localize "$SESSION"`.
+   Wait for **LOCALIZE PASS**, check RViz scan/wall overlap, and leave it running.
+   **FAIL:** stay parked, read the observed/expected pose and fix the cause;
+   do not enable autonomous operation on a failed or visually wrong map.
+
+### Preparation and rationale
+
+Rebuild/source the overlay before use (`colcon build --symlink-install
+--packages-select sentry_localization thornbots_pkg`, then `source install/setup.bash`).
+These commands run in the robot container. For the existing robot service see
+[full robot pipeline](../realsense-yolov8-nitros-bridge/README.md#full-robot-pipeline).
+Use the same ROS domain/middleware as the robot. The bounded existing-stack
+check cannot detect nodes hidden in another domain.
+
+One new session holds `session.json`, `boot.json`, `snapshot/`, `deployment/`
+and independent `backup/` autosaves. Keep the whole directory. Autosaves run
+while mapping; an unsaved Ctrl-C/SIGTERM prints a prominent warning and the
+backup path. Backups are recovery material, not a validated deployment bundle.
+The same warning prints if the launch exits on its own.
+An explicit save validates fresh occupancy data and serialize service success,
+then atomically installs PGM/YAML plus nonempty `.posegraph/.data` and boot data.
+Saving requires the live mapping session ID and a fresh `map->root` within
+0.15 m/0.15 rad of captured boot. Keep parked throughout saving. Occupancy and
+graph are sequential snapshots, not one transactional SLAM snapshot.
+
+No operator odometry seed is accepted. Mapping and localize default to raw wheel
+passthrough in `nav_odom`; it needs no seed. On the level-station sim map, raw
+input passed the 21 m AMCL drive while rf2o/EKF failed it, and raw input keeps
+rf2o's lidar corrections out of SLAM's own scan matching. `--rf2o` opts in to
+rf2o/EKF. Sim wheels are exact, so wheel slip on the robot is untested.
+Field startup first runs the raw-input
+stack with only UART input and pose translation (no relay or command producers), verifies referee team and raw
+start, and stops that stack before launching the selected backend. Field
+rf2o/EKF startup independently waits up to 15 wall seconds for a nonzero referee
+assignment and a subsequent fresh `/odom` at that team's start. Explicit
+`--no-referee` bypasses only the referee gate: EKF still checks fresh raw x/y
+against the explicit team's start after restart. `--raw-odom` is retained as an
+explicit alias for the wheel default. Room rehearsal uses `mapping "$SESSION" --room`,
+then the same boot/save steps, `prepare-room "$SESSION"`, and `localize
+"$SESSION"`. Room mode keeps boot coordinates and raw passthrough. It makes no
+field registration claim. Map the whole field with the
+[broad-field coverage](#broad-field-coverage) procedure; a central loop alone
+leaves much of the field unseen.
+
+Room sessions record `frame_mode: room` and `team: null`; boot/save and
+`prepare-room` need no referee (including `robot_id: 0`). On a practice field
+without a referee, use `mapping "$SESSION" --no-referee --team red` (or blue)
+and the same flags on `localize`. This explicit choice still requires raw
+`/odom` within 0.3 m of that team's contract start. It cannot repair a wrong-side
+firmware seed. Boot/save inherit the choice from `session.json`.
+
+Boot capture requires 20 fixed-geometry fresh lidar scans and at least two
+stationary seconds of stamped root/chassis data (3 cm/0.03 rad motion limit).
+It records raw `/odom`, referee team and the live mapping session ID. Field
+alignment derives team from that record; optional `--team` must agree. Raw
+odometry and measured field x must have the team's sign: red negative, blue
+positive. Firmware already adds the team heading to IMU yaw, so measured chassis
+heading minus captured chassis yaw must be within 0.25 rad of zero. A 180-degree
+team/heading mistake therefore fails even on the symmetric field. `--yaw`
+accepts radians only in [-pi, pi]; negative scientific notation is accepted.
+These checks cannot replace checking the referee configuration and surveyed
+heading against the physical field.
+
+A field-aligned map can be used by either team. AMCL starts from the live team's
+contract root (-4.625, 0, 0) or (4.625, 0, 0), checked against live raw odometry;
+the map's captured team describes registration provenance. AMCL supplies
+`map->nav_odom`, not `/localization/odom`: with rf2o that topic comes from EKF
+fusing raw velocity/fixed heading and rf2o position; room/`--raw-odom` uses
+passthrough raw odometry. The relay consumes this navigation odometry, so an
+incorrect EKF seed cannot be repaired by a correct AMCL map pose alone.
+Automatic `localize` and standalone `convergence` both require samples no older
+than 3 seconds, alongside the existing covariance, scan, TF and parked-pose gates.
+
+The rigid registration maps captured boot root to the surveyed physical start.
+It resamples cell centres into a yaw-zero occupancy raster; editing YAML yaw
+alone is incorrect for AMCL. Thin surfaces can change by a cell; inspect them.
+The graph stays untouched in its original boot frame. Do not load it as a
+transformed field graph. Registration adjusts map localization only; firmware
+routes, raw CV aim, odometry constants and movement are unchanged.
+
+`localize` runs artifact/registration `check`, starts AMCL, then automatically
+runs parked `convergence`; one final LOCALIZE PASS/FAIL reports the result.
+Field convergence additionally compares current referee team/raw odometry with
+the boot record. It requests stationary AMCL updates and requires five fresh
+pose stamps over five seconds, xy std <=0.25 m, yaw std <=0.15 rad, distance from
+registered start <=0.4 m and yaw difference <=0.25 rad, plus fresh scans and
+stamped map/root/lidar TF. A timeout prints observed and expected pose and says
+when the robot is away from its start. This is filter convergence, not an
+independent proof of field accuracy. RViz wall/scan inspection remains required.
+
+For a longer parked/head-slew check in another terminal:
+`ros2 run sentry_localization operator_workflow convergence "$SESSION" --hold 30 --samples 20 --max-distance 0.15 --max-std 0.15`.
+`check "$SESSION"` and `preflight` are also available separately. Each successful
+step prints its next command. For simulation add `--sim-time` to mapping,
+boot-pose, save, localize and convergence, and `real_hardware:=false` to
+mapping/localize. Timeouts use wall time even when simulation pauses.
+
+The Oct 18 hardware lidar had variable beam count/angular increments; preflight
+rejects that stream. Hardware scan consistency remains unvalidated. On a failed
+save or doubtful boot provenance, retain the session and recapture/remap in a
+new session. On failed localization keep parked and stop the stack before using
+the existing odometry-only fallback (`auto.launch.py localization_mode:=none
+use_rf2o:=false`), which makes no map-localization claim.
+
+Offline regression checks: `python3 -m pytest test/test_operator_workflow.py
+test/test_seeded_ekf.py`. The same suites run through `colcon test
+--packages-select sentry_localization`. ROS rehearsal additionally exercises
+clock ordering, TF, serialization, seed gating and parked scan updates.
+
+### Broad-field coverage
+
+Map overlapping views of both side lanes, the centre, and the far ends; return
+through previously observed geometry and close the loop at the captured start.
+A small central loop can look accurate while leaving much of the field unseen.
+Inspect coverage and wall placement, including the backs of obstacles, before
+deploying the map. Keep a rollback snapshot if a transfer distorts established
+walls. The [full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.md)
+records the validated sim route, coverage, input choices and remaining limits.
+
+Use level, parked observation stations around rough ground. Pause scan insertion
+before a rough transfer, drive using the existing controls, stop on level ground,
+and let the chassis settle before resuming. Sweep the head while parked to fill
+its blind sector, checking that scans remain on mapped walls. Maintain overlapping
+views; long unobserved transfers leave wheel slip for the next match to recover.
+Reduced speed alone did not make the simulated rough crossings reliable.
+
+`pause "$SESSION"` and `resume "$SESSION"` set slam_toolbox's scan insertion.
+Its service only toggles, so each command reads `paused_new_measurements`, calls
+the toggle only when needed and fails unless the parameter then matches; the
+live mapping session must be this session. Pause before each rough transfer;
+resume parked and settled, before observing or saving. This pauses mapping
+updates, not the robot. It does not repair invalid scans or an already
+distorted map. If the chassis cannot settle or scan/wall overlap cannot be
+recovered, stop and remap from level stations.
+Hardware still needs lidar geometry, extrinsics, wheel-slip and surveyed-heading
+validation; the sim's ground-truth-derived raw input establishes no wheel accuracy.
 
 ## Saved map
 

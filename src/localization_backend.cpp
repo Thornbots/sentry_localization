@@ -24,7 +24,58 @@
 #include "nav2_map_server/map_server.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_components/node_factory_template.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 #include "slam_toolbox/slam_toolbox_async.hpp"
+#include "tf2/exceptions.h"
+#include "tf2_ros/buffer.h"
+
+// nav2_amcl caches each scan frame's base->laser x/y at its first scan. Our
+// lidar rides the head, about 0.22 m off root's yaw axis, so refresh that
+// mount from TF at every scan stamp before AMCL's own callback. AMCL already
+// re-reads the mount yaw per scan. See README.md (config/amcl.yaml).
+class TrackedMountAmcl : public nav2_amcl::AmclNode
+{
+public:
+  using nav2_amcl::AmclNode::AmclNode;
+
+protected:
+  nav2_util::CallbackReturn on_activate(const rclcpp_lifecycle::State & state) override
+  {
+    const auto result = nav2_amcl::AmclNode::on_activate(state);
+    laser_scan_connection_.disconnect();
+    laser_scan_connection_ = laser_scan_filter_->registerCallback(
+      [this](sensor_msgs::msg::LaserScan::ConstSharedPtr scan) {receive(scan);});
+    return result;
+  }
+
+private:
+  void receive(const sensor_msgs::msg::LaserScan::ConstSharedPtr & scan)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const auto found = frame_to_laser_.find(scan->header.frame_id);
+    if (found != frame_to_laser_.end()) {
+      std::string frame = scan->header.frame_id;
+      if (!frame.empty() && frame.front() == '/') {
+        frame.erase(0, 1);
+      }
+      geometry_msgs::msg::TransformStamped mount;
+      try {
+        mount = tf_buffer_->lookupTransform(
+          base_frame_id_, frame, tf2_ros::fromMsg(scan->header.stamp));
+      } catch (const tf2::TransformException & error) {
+        RCLCPP_WARN_THROTTLE(
+          get_logger(), *get_clock(), 2000, "Skipping scan without stamped %s->%s: %s",
+          base_frame_id_.c_str(), frame.c_str(), error.what());
+        return;
+      }
+      pf_vector_t pose = pf_vector_zero();
+      pose.v[0] = mount.transform.translation.x;
+      pose.v[1] = mount.transform.translation.y;
+      lasers_[found->second]->SetLaserPose(pose);
+    }
+    laserReceived(scan);
+  }
+};
 
 // Static composition keeps lifecycle services local and libraries loaded until exit.
 // Each node has its own executor; see README.md.
@@ -84,7 +135,7 @@ int main(int argc, char ** argv)
     }
     if (args[1] == "amcl") {
       backend.add<nav2_map_server::MapServer>("map_server");
-      backend.add<nav2_amcl::AmclNode>("amcl");
+      backend.add<TrackedMountAmcl>("amcl");
     } else {
       backend.add<slam_toolbox::AsynchronousSlamToolbox>("slam_toolbox");
     }
