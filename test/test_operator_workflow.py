@@ -98,6 +98,55 @@ def make_bundle(tmp_path):
     return source
 
 
+def test_room_bundle_without_referee(tmp_path):
+    source = make_bundle(tmp_path)
+    boot = json.loads((source / "boot.json").read_text())
+    boot.update(frame_mode="room", team=None)
+    (source / "boot.json").write_text(json.dumps(boot))
+    workflow.prepare_room(NS(source=source, output=tmp_path / "room"))
+    assert workflow.check(tmp_path / "room")["frame_mode"] == "room"
+    boot["frame_mode"] = "field"
+    (source / "boot.json").write_text(json.dumps(boot))
+    with pytest.raises(ValueError, match="referee team"):
+        workflow.validate_bundle(source)
+
+
+@pytest.mark.parametrize("room,no_referee,team,passes", [
+    (True, False, None, True), (False, False, None, False),
+    (False, True, "red", True), (False, True, "blue", False),
+])
+def test_robot_id_zero(monkeypatch, room, no_referee, team, passes):
+    import sys
+
+    for name in ("nav_msgs.msg", "dji_serial_bridge.msg", "std_msgs.msg"):
+        monkeypatch.setitem(sys.modules, name, NS(Odometry=object, RefSysStatus=object, String=object))
+    monkeypatch.setitem(sys.modules, "rclpy.qos", NS(
+        qos_profile_sensor_data=object(), QoSProfile=lambda **kw: None,
+        DurabilityPolicy=NS(TRANSIENT_LOCAL=1)))
+
+    def subscribe(kind, topic, callback, qos):
+        if topic == "/odom":
+            callback(NS(header=NS(stamp=NS(sec=1, nanosec=0)),
+                        pose=NS(pose=NS(position=NS(x=-4.625, y=0)))))
+        elif topic.endswith("ref_sys"):
+            callback(NS(robot_id=0, is_on_blue_team=False))
+        return object()
+
+    def wait(predicate, timeout):
+        if not predicate():
+            raise RuntimeError("timeout")
+
+    runtime = NS(subscriptions=[], wait=wait, node=NS(
+        create_subscription=subscribe, get_clock=lambda: NS(now=lambda: NS(nanoseconds=10**9))))
+    args = NS(room=room, no_referee=no_referee, team=team, timeout=1, max_age=3)
+    if passes:
+        result = workflow.observe_inputs(runtime, args, require_session=False)
+        assert result["team"] == (None if room else team)
+    else:
+        with pytest.raises((RuntimeError, ValueError)):
+            workflow.observe_inputs(runtime, args, require_session=False)
+
+
 def test_alignment_keeps_graph_boot_frame_and_seeds_root(tmp_path):
     source = make_bundle(tmp_path)
     output = tmp_path / "field"

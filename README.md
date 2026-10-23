@@ -456,6 +456,13 @@ then the same boot/save steps, `prepare-room "$SESSION"`, and `localize
 field registration claim. The broad-field SLAM divergence investigation remains
 open; a partial central map does not establish full-field coverage.
 
+Room sessions record `frame_mode: room` and `team: null`; boot/save and
+`prepare-room` need no referee (including `robot_id: 0`). On a practice field
+without a referee, use `mapping "$SESSION" --no-referee --team red` (or blue)
+and the same flags on `localize`. This explicit choice still requires raw
+`/odom` within 0.3 m of that team's contract start. It cannot repair a wrong-side
+firmware seed. Boot/save inherit the choice from `session.json`.
+
 Boot capture requires 20 fixed-geometry fresh lidar scans and at least two
 stationary seconds of stamped root/chassis data (3 cm/0.03 rad motion limit).
 It records raw `/odom`, referee team and the live mapping session ID. Field

@@ -156,7 +156,10 @@ def validate_bundle(directory):
         math.isfinite(v) for v in [*boot["root"], boot["chassis_yaw"]]
     ):
         raise ValueError("invalid captured boot pose")
-    if not boot.get("session_id") or boot.get("team") not in ("red", "blue"):
+    if not boot.get("session_id") or (
+        boot.get("frame_mode", "field") != "room"
+        and boot.get("team") not in ("red", "blue")
+    ):
         raise ValueError("boot capture lacks session ID or referee team; recapture")
 
 
@@ -437,7 +440,12 @@ def observe_inputs(runtime, args, require_session=True):
     from std_msgs.msg import String
     from rclpy.qos import qos_profile_sensor_data, QoSProfile, DurabilityPolicy
 
-    state = {}
+    room = getattr(args, "room", False)
+    no_referee = getattr(args, "no_referee", False)
+    team = getattr(args, "team", None)
+    if no_referee and (room or team not in ("red", "blue")):
+        raise ValueError("--no-referee requires --team red|blue in field mode")
+    state = dict(team=None if room else team) if room or no_referee else {}
 
     def odom(message):
         stamp = message.header.stamp.sec * 10**9 + message.header.stamp.nanosec
@@ -447,7 +455,10 @@ def observe_inputs(runtime, args, require_session=True):
             state["raw_odom"] = [p.x, p.y]
 
     def referee(message):
-        if message.robot_id:
+        if message.robot_id and not room:
+            observed = "blue" if message.is_on_blue_team else "red"
+            if no_referee and observed != team:
+                raise ValueError("explicit team disagrees with live referee")
             state["team"] = "blue" if message.is_on_blue_team else "red"
 
     streams = [
@@ -468,12 +479,17 @@ def observe_inputs(runtime, args, require_session=True):
             runtime.node.create_subscription(message_type, topic, callback, qos)
         )
     try:
-        runtime.wait(lambda: len(state) == len(streams), args.timeout)
+        required = {"raw_odom", "team"} | ({"session_id"} if require_session else set())
+        runtime.wait(lambda: required <= state.keys(), args.timeout)
     except RuntimeError as error:
         raise RuntimeError(
             f"timeout waiting for raw /odom, referee team, live session; received {list(state)}"
         ) from error
-    return state
+    if not room:
+        expected = [-4.625 if state["team"] == "red" else 4.625, 0.0]
+        if math.dist(state["raw_odom"], expected) > 0.3:
+            raise ValueError(f"raw /odom disagrees with team start {expected}: {state['raw_odom']}")
+    return dict(state, frame_mode="room" if room else "field")
 
 
 def verify_start(boot, live):
@@ -852,7 +868,9 @@ def run_stack(args, session, launch):
             runtime = Runtime(args.sim_time)
             session_id = str(uuid.uuid4())
             (session / "session.json").write_text(
-                json.dumps(dict(session_id=session_id))
+                json.dumps(dict(session_id=session_id, frame_mode="room" if args.room else "field",
+                                team=None if args.room else args.team,
+                                no_referee=args.no_referee))
             )
             publisher = runtime.node.create_publisher(
                 String,
@@ -939,6 +957,9 @@ def main():
     checking.add_argument("directory")
     localizing = commands.add_parser("localize")
     localizing.add_argument("directory")
+    for command in (mapping, localizing):
+        command.add_argument("--no-referee", action="store_true")
+        command.add_argument("--team", choices=["red", "blue"])
     localizing.add_argument(
         "--raw-odom",
         action="store_true",
@@ -982,6 +1003,11 @@ def main():
         args.output, args.boot = session / "snapshot", session / "boot.json"
     elif args.command == "boot-pose":
         args.output = session / "boot.json"
+    if args.command in ("boot-pose", "save"):
+        metadata = json.loads((session / "session.json").read_text())
+        args.room = metadata["frame_mode"] == "room"
+        args.no_referee = metadata.get("no_referee", False)
+        args.team = metadata.get("team")
     elif args.command in ("check", "localize", "convergence"):
         args.directory = session / "deployment"
     if trailing:
@@ -1030,6 +1056,8 @@ def main():
             convergence(args)
         else:
             extra = args.launch_args
+            if args.no_referee and (getattr(args, "room", False) or args.team is None):
+                raise ValueError("--no-referee requires --team red|blue in field mode")
             protected = {
                 "localization_mode",
                 "load_map",
