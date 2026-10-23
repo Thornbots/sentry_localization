@@ -25,8 +25,10 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -183,10 +185,15 @@ def generate_launch_description():
         initial = {} if seeded else {'initial_state': [
             float(context.launch_configurations['initial_x']),
             float(context.launch_configurations['initial_y'])] + [0.0] * 13}
+        arguments = ['--seed-use-sim-time', use_sim_time] if seeded else []
+        if seeded and context.launch_configurations['seed_require_team'].lower() == 'true':
+            arguments.append('--require-team')
+        if seeded and context.launch_configurations.get('seed_explicit_team', ''):
+            arguments.extend(['--team', context.launch_configurations['seed_explicit_team']])
         node = Node(
             package='sentry_localization' if seeded else 'robot_localization',
             executable='seeded_ekf' if seeded else 'ekf_node',
-            arguments=['--seed-use-sim-time', use_sim_time] if seeded else [],
+            arguments=arguments,
             name='ekf_filter_node',
             output='screen',
             condition=IfCondition(ekf_selected),
@@ -206,7 +213,10 @@ def generate_launch_description():
             ],
         )
 
-        return [node]
+        shutdown = RegisterEventHandler(OnProcessExit(
+            target_action=node,
+            on_exit=[EmitEvent(event=Shutdown(reason='EKF process exited'))]))
+        return [shutdown, node]
 
     ekf_node = OpaqueFunction(function=make_ekf)
 
@@ -315,6 +325,10 @@ def generate_launch_description():
             description='Wait up to 15 wall seconds for fresh raw /odom before starting '
             'EKF; use its x/y instead of initial_x/y. Requires use_rf2o:=true.'),
         DeclareLaunchArgument(
+            'seed_require_team', default_value='false', choices=['true', 'false'],
+            description='With seed_from_raw_odom, require referee robot_id then fresh '
+            '/odom within 0.3 m of its team start (+/-4.625, 0).'),
+        DeclareLaunchArgument(
             'initial_x', default_value='0.0',
             description='Initial firmware navigation X for EKF, meters'),
         DeclareLaunchArgument(
@@ -330,6 +344,9 @@ def generate_launch_description():
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
+        DeclareLaunchArgument('seed_explicit_team', default_value='', choices=['', 'red', 'blue'],
+                              description='Explicit practice team; check seed position '
+                              'without referee.'),
         passthrough_odom_node, ekf_input_node, ekf_node,
         scan_odom_node, map_pose_node, map_autosaver_node,
         slam_with_map_container, slam_no_map_container, amcl_container,

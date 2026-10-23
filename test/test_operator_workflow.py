@@ -150,15 +150,15 @@ def test_robot_id_zero(monkeypatch, room, no_referee, team, passes):
 def test_alignment_keeps_graph_boot_frame_and_seeds_root(tmp_path):
     source = make_bundle(tmp_path)
     output = tmp_path / "field"
-    workflow.align(NS(source=source, output=output, x=-4.0, y=0.3, yaw=0, team="red"))
+    workflow.align(NS(source=source, output=output, x=-4.5, y=0.1, yaw=0, team="red"))
     manifest = workflow.check(output)
-    assert manifest["initial_root"] == pytest.approx([-4, 0.3, 0])
+    assert manifest["initial_root"] == pytest.approx([-4.5, 0.1, 0])
     assert (source / "map.posegraph").read_bytes() == b"graph-data"
     assert not (output / "field.posegraph").exists()
     assert yaml.safe_load((output / "field.yaml").read_text())["origin"][2] == 0
     with pytest.raises(FileExistsError):
         workflow.align(
-            NS(source=source, output=output, x=-4.0, y=0.3, yaw=0, team="red")
+            NS(source=source, output=output, x=-4.5, y=0.1, yaw=0, team="red")
         )
 
 
@@ -280,13 +280,13 @@ def test_room_has_no_field_inputs_and_keeps_boot_coordinates(tmp_path):
             [
                 "use_rf2o:=false",
                 "seed_from_raw_odom:=true",
-                "amcl_initial_x:=-4.3",
-                "amcl_initial_yaw:=0.2",
+                "amcl_initial_x:=-4.625",
+                "amcl_initial_yaw:=0.0",
             ],
         ),
         (
             ["localize", "BUNDLE", "--rf2o", "real_hardware:=false"],
-            ["use_rf2o:=true", "amcl_initial_x:=-4.3"],
+            ["use_rf2o:=true", "amcl_initial_x:=-4.625"],
         ),
     ],
 )
@@ -304,6 +304,7 @@ def test_launch_cli_trailing_arguments_and_independent_seeds(
         lambda _: dict(frame_mode="field", initial_root=[-4.3, 0.2, 0.2]),
     )
     monkeypatch.setattr(workflow, "ensure_stack_stopped", lambda: None)
+    monkeypatch.setattr(workflow, "field_start", lambda args, extra: [-4.625, 0.0, 0.0])
     monkeypatch.setattr(
         workflow, "run_stack", lambda args, session, cmd: captured.extend(cmd)
     )
@@ -542,3 +543,80 @@ def test_insertion_toggle_is_idempotent_and_verified(
         workflow.set_insertion(args, paused)
         assert state["value"] == paused
     assert state["toggles"] == (0 if live != "live" or initial == paused else 1)
+
+
+def test_alignment_defaults_and_typo_rejection(tmp_path):
+    source = make_bundle(tmp_path)
+    workflow.align(NS(source=source, output=tmp_path / "default", x=None, y=None, yaw=0, team=None))
+    assert workflow.check(tmp_path / "default")["initial_root"] == [-4.625, 0, 0]
+    with pytest.raises(ValueError, match="0.3 m"):
+        workflow.align(NS(source=source, output=tmp_path / "typo", x=-4.265, y=0, yaw=0, team=None))
+
+
+def test_red_map_accepts_live_blue_start():
+    assert workflow.verify_start(dict(team="red", raw_odom=[-4.625, 0]),
+                                 dict(team="blue", raw_odom=[4.625, 0])) == [4.625, 0, 0]
+
+
+def test_bootstrap_sigterm_cleans_process_group(monkeypatch):
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    processes = []
+    real_popen = subprocess.Popen
+
+    def launch(*a, **kw):
+        process = real_popen([sys.executable, '-c', 'import time; time.sleep(60)'], **kw)
+        processes.append(process)
+        return process
+
+    def observe(*a, **kw):
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    previous = signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr(workflow.subprocess, 'Popen', launch)
+    monkeypatch.setattr(workflow, 'Runtime', lambda sim: NS(close=lambda: None))
+    monkeypatch.setattr(workflow, 'observe_inputs', observe)
+    with pytest.raises(RuntimeError, match='signal'):
+        workflow.field_start(NS(sim_time=False), [])
+    assert processes[0].poll() is not None
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
+def test_localize_gate_defaults_match_standalone(monkeypatch, tmp_path):
+    import sys
+
+    captured = []
+    fields = ("max_std", "max_yaw_std", "max_distance", "max_yaw", "hold", "samples", "max_age")
+    monkeypatch.setattr(workflow, "convergence", lambda args: captured.append([getattr(args, k) for k in fields]))
+    monkeypatch.setattr(sys, "argv", ["operator_workflow", "convergence", str(tmp_path)])
+    workflow.main()
+    monkeypatch.setattr(workflow.subprocess, "Popen", lambda *a, **kw: NS(poll=lambda: 0, returncode=0))
+    with pytest.raises(RuntimeError, match="stopped before"):
+        workflow.run_stack(NS(command="localize", max_age=30), tmp_path, [])
+    assert captured[0] == captured[1]
+    assert captured[1][-1] == 3.0
+
+
+@pytest.mark.parametrize("code", [0, 1])
+def test_unsaved_warning_on_launch_exit(monkeypatch, tmp_path, capsys, code):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "std_msgs.msg", NS(String=lambda **kw: kw))
+    monkeypatch.setitem(sys.modules, "rclpy.qos", NS(QoSProfile=lambda **kw: None, DurabilityPolicy=NS(TRANSIENT_LOCAL=1)))
+    monkeypatch.setattr(workflow, "Runtime", lambda sim: NS(
+        node=NS(create_publisher=lambda *a: NS(publish=lambda m: None)), close=lambda: None))
+    monkeypatch.setattr(workflow.subprocess, "Popen", lambda *a, **kw: NS(poll=lambda: code, returncode=code))
+    args = NS(command="mapping", sim_time=False, room=True, no_referee=False, team=None)
+    if code:
+        with pytest.raises(RuntimeError, match="launch exited"):
+            workflow.run_stack(args, tmp_path, [])
+    else:
+        workflow.run_stack(args, tmp_path, [])
+    output = capsys.readouterr().out
+    assert output.count("WARNING: UNSAVED") == 1
+    assert str(tmp_path / "backup") in output
+    metadata = json.loads((tmp_path / "session.json").read_text())
+    assert metadata["frame_mode"] == "room" and metadata["team"] is None

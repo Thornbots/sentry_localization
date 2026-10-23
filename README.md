@@ -443,13 +443,14 @@ the team must match those assumptions separately before autonomous use.
    chassis and head, and inspect coverage/loop closure and scan/wall overlap.
    Save **before stopping mapping**:
    `ros2 run sentry_localization operator_workflow save "$SESSION"`.
-4. Register the surveyed boot chassis pose in metres/radians. Team comes from
+4. Register the boot chassis heading in radians. Team comes from
    the captured referee message. **Red**, facing +x:
-   `ros2 run sentry_localization operator_workflow align "$SESSION" --x -4.625 --y 0 --yaw 0`.
+   `ros2 run sentry_localization operator_workflow align "$SESSION" --yaw 0`.
    **Blue**, facing -x (use `oct31-blue-01` as the session in step 1):
-   `ros2 run sentry_localization operator_workflow align "$SESSION" --x 4.625 --y 0 --yaw 3.141592653589793`.
-   Replace these examples with the measured physical start. Never enter degrees.
-5. Stop mapping with Ctrl-C. Stay/return to that same physical start. Run:
+   `ros2 run sentry_localization operator_workflow align "$SESSION" --yaw 3.141592653589793`.
+   x/y default to the team's contract start. Optional surveyed `--x`/`--y`
+   refinements must stay within 0.3 m of captured raw odometry. Never enter degrees.
+5. Stop mapping with Ctrl-C. Park at the live team's contract start. Run:
    `ros2 run sentry_localization operator_workflow localize "$SESSION"`.
    Wait for **LOCALIZE PASS**, check RViz scan/wall overlap, and leave it running.
    **FAIL:** stay parked, read the observed/expected pose and fix the cause;
@@ -468,6 +469,7 @@ One new session holds `session.json`, `boot.json`, `snapshot/`, `deployment/`
 and independent `backup/` autosaves. Keep the whole directory. Autosaves run
 while mapping; an unsaved Ctrl-C/SIGTERM prints a prominent warning and the
 backup path. Backups are recovery material, not a validated deployment bundle.
+The same warning prints if the launch exits on its own.
 An explicit save validates fresh occupancy data and serialize service success,
 then atomically installs PGM/YAML plus nonempty `.posegraph/.data` and boot data.
 Saving requires the live mapping session ID and a fresh `map->root` within
@@ -478,8 +480,15 @@ No operator odometry seed is accepted. Mapping and localize default to raw wheel
 passthrough in `nav_odom`; it needs no seed. On the level-station sim map, raw
 input passed the 21 m AMCL drive while rf2o/EKF failed it, and raw input keeps
 rf2o's lidar corrections out of SLAM's own scan matching. `--rf2o` opts in to
-rf2o/EKF, which waits up to 15 wall seconds for fresh raw `/odom` and seeds its
-x/y from that sample. Sim wheels are exact, so wheel slip on the robot is untested. Room rehearsal uses `mapping "$SESSION" --room`,
+rf2o/EKF. Sim wheels are exact, so wheel slip on the robot is untested.
+Field startup first runs the raw-input
+stack with only UART input and pose translation (no relay or command producers), verifies referee team and raw
+start, and stops that stack before launching the selected backend. Field
+rf2o/EKF startup independently waits up to 15 wall seconds for a nonzero referee
+assignment and a subsequent fresh `/odom` at that team's start. Explicit
+`--no-referee` bypasses only the referee gate: EKF still checks fresh raw x/y
+against the explicit team's start after restart. `--raw-odom` is retained as an
+explicit alias for the wheel default. Room rehearsal uses `mapping "$SESSION" --room`,
 then the same boot/save steps, `prepare-room "$SESSION"`, and `localize
 "$SESSION"`. Room mode keeps boot coordinates and raw passthrough. It makes no
 field registration claim. Map the whole field with the
@@ -504,6 +513,16 @@ team/heading mistake therefore fails even on the symmetric field. `--yaw`
 accepts radians only in [-pi, pi]; negative scientific notation is accepted.
 These checks cannot replace checking the referee configuration and surveyed
 heading against the physical field.
+
+A field-aligned map can be used by either team. AMCL starts from the live team's
+contract root (-4.625, 0, 0) or (4.625, 0, 0), checked against live raw odometry;
+the map's captured team describes registration provenance. AMCL supplies
+`map->nav_odom`, not `/localization/odom`: with rf2o that topic comes from EKF
+fusing raw velocity/fixed heading and rf2o position; room/`--raw-odom` uses
+passthrough raw odometry. The relay consumes this navigation odometry, so an
+incorrect EKF seed cannot be repaired by a correct AMCL map pose alone.
+Automatic `localize` and standalone `convergence` both require samples no older
+than 3 seconds, alongside the existing covariance, scan, TF and parked-pose gates.
 
 The rigid registration maps captured boot root to the surveyed physical start.
 It resamples cell centres into a yaw-zero occupancy raster; editing YAML yaw

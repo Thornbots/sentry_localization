@@ -65,6 +65,8 @@ def validate_field(boot, team, x, y, yaw):
         raise ValueError("invalid captured raw /odom")
     if (raw[0] < 0) != (team == "red") or raw[0] == 0:
         raise ValueError("raw /odom sign disagrees with referee team; reboot correctly")
+    if math.dist(raw, (x, y)) > 0.3:
+        raise ValueError("surveyed start differs from boot raw /odom by more than 0.3 m")
     if abs(angle(yaw - boot["chassis_yaw"])) > 0.25:
         raise ValueError("field_yaw must be near zero: check team and chassis heading")
 
@@ -169,6 +171,8 @@ def align(args):
     validate_bundle(source)
     boot = json.loads((source / "boot.json").read_text())
     args.team = args.team or boot["team"]
+    args.x = (-4.625 if args.team == "red" else 4.625) if args.x is None else args.x
+    args.y = 0.0 if args.y is None else args.y
     validate_field(boot, args.team, args.x, args.y, args.yaw)
     correction, root = registration(
         boot["root"], args.x, args.y, args.yaw, boot["chassis_yaw"]
@@ -288,7 +292,7 @@ class Runtime:
 
     def close(self):
         self.node.destroy_node()
-        self.ros.shutdown()
+        self.ros.try_shutdown()
 
 
 def scan_geometry(scan):
@@ -480,10 +484,18 @@ def observe_inputs(runtime, args, require_session=True):
         )
     try:
         required = {"raw_odom", "team"} | ({"session_id"} if require_session else set())
-        runtime.wait(lambda: required <= state.keys(), args.timeout)
+        def ready():
+            if not required <= state.keys():
+                return False
+            if room:
+                return True
+            expected = [-4.625 if state["team"] == "red" else 4.625, 0.0]
+            return math.dist(state["raw_odom"], expected) <= 0.3
+
+        runtime.wait(ready, args.timeout)
     except RuntimeError as error:
         raise RuntimeError(
-            f"timeout waiting for raw /odom, referee team, live session; received {list(state)}"
+            f"timeout waiting for raw /odom at team start, referee team, live session; received {state}"
         ) from error
     if not room:
         expected = [-4.625 if state["team"] == "red" else 4.625, 0.0]
@@ -493,14 +505,13 @@ def observe_inputs(runtime, args, require_session=True):
 
 
 def verify_start(boot, live):
-    """Never localize a carried map with another team's or start's raw seed."""
-    if (
-        live["team"] != boot["team"]
-        or math.dist(live["raw_odom"], boot["raw_odom"]) > 0.4
-    ):
+    """Field-aligned maps support either team; validate the live contract start."""
+    expected = [-4.625 if live["team"] == "red" else 4.625, 0.0]
+    if live["team"] not in ("red", "blue") or math.dist(live["raw_odom"], expected) > 0.3:
         raise ValueError(
-            f"seed/team mismatch: observed={live}, expected team={boot['team']} raw_odom={boot['raw_odom']}; return to registered start"
+            f"seed/team mismatch: observed={live}, expected raw_odom={expected}; return to team start"
         )
+    return [*expected, 0.0]
 
 
 def current_root(runtime, args):
@@ -785,7 +796,8 @@ def convergence(args):
             boot = json.loads(
                 (Path(args.directory) / manifest["source"] / "boot.json").read_text()
             )
-            verify_start(boot, observe_inputs(runtime, args, require_session=False))
+            manifest["initial_root"] = verify_start(
+                boot, observe_inputs(runtime, args, require_session=False))
         state["geometry"] = reference
         try:
             runtime.wait(ready, args.timeout)
@@ -894,21 +906,54 @@ def ensure_stack_stopped():
         runtime.close()
 
 
+def field_start(args, extra):
+    """Bring up raw inputs first, then stop them before starting the backend."""
+    launch = ["ros2", "launch", "thornbots_pkg", "auto.launch.py",
+              "operator_inputs_only:=true", *extra]
+    old_handlers = {}
+
+    def interrupted(signum, _frame):
+        raise RuntimeError(f"raw-input validation interrupted by signal {signum}")
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        old_handlers[signum] = signal.signal(signum, interrupted)
+    process = None
+    runtime = None
+    try:
+        process = subprocess.Popen(launch, start_new_session=True)
+        runtime = Runtime(args.sim_time)
+        for signum in old_handlers:
+            signal.signal(signum, interrupted)
+        return verify_start({}, observe_inputs(runtime, args, require_session=False))
+    finally:
+        if process is not None and process.poll() is None:
+            os.killpg(process.pid, signal.SIGINT)
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+        if runtime:
+            runtime.close()
+        for signum, handler in old_handlers.items():
+            signal.signal(signum, handler)
+
+
 def run_stack(args, session, launch):
     """Supervise the launch, retain backups and stop the whole owned process group."""
     runtime = None
     process = None
     old_handlers = {}
+    warned = False
+
+    def warn_unsaved():
+        nonlocal warned
+        if args.command == "mapping" and not warned and not (session / "snapshot" / "map.posegraph").exists():
+            print(f"WARNING: UNSAVED mapping stop. Backup: {session / 'backup'}; explicit save has not passed.", flush=True)
+            warned = True
 
     def stop(signum, _frame):
-        if (
-            args.command == "mapping"
-            and not (session / "snapshot" / "map.posegraph").exists()
-        ):
-            print(
-                f"WARNING: UNSAVED mapping stop. Backup: {session / 'backup'}; explicit save has not passed.",
-                flush=True,
-            )
+        warn_unsaved()
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signum)
 
@@ -941,6 +986,7 @@ def run_stack(args, session, launch):
                 max_yaw=0.25,
                 hold=5.0,
                 samples=5,
+                max_age=3.0,
             ).items():
                 setattr(args, name, value)
             convergence(args)
@@ -967,6 +1013,7 @@ def run_stack(args, session, launch):
         if process.returncode:
             raise RuntimeError(f"robot launch exited {process.returncode}")
     finally:
+        warn_unsaved()
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGINT)
             try:
@@ -997,7 +1044,7 @@ def main():
     alignment.add_argument("source")
     alignment.add_argument("--team", choices=["red", "blue"])
     for name in ("x", "y", "yaw"):
-        alignment.add_argument("--" + name, type=float, required=True)
+        alignment.add_argument("--" + name, type=float, required=name == "yaw")
     room = commands.add_parser("prepare-room")
     room.add_argument("source")
     checking = commands.add_parser("check")
@@ -1055,11 +1102,6 @@ def main():
         args.output, args.boot = session / "snapshot", session / "boot.json"
     elif args.command == "boot-pose":
         args.output = session / "boot.json"
-    if args.command in ("boot-pose", "save"):
-        metadata = json.loads((session / "session.json").read_text())
-        args.room = metadata["frame_mode"] == "room"
-        args.no_referee = metadata.get("no_referee", False)
-        args.team = metadata.get("team")
     elif args.command in ("check", "localize", "convergence"):
         args.directory = session / "deployment"
     if trailing:
@@ -1088,6 +1130,11 @@ def main():
         if hasattr(args, name) and getattr(args, name) <= 0:
             parser.error(f"{name} must be positive")
     try:
+        if args.command in ("boot-pose", "save"):
+            metadata = json.loads((session / "session.json").read_text())
+            args.room = metadata.get("frame_mode", "field") == "room"
+            args.no_referee = metadata.get("no_referee", False)
+            args.team = metadata.get("team")
         if args.command == "boot-pose":
             capture_boot(args)
         elif args.command == "preflight":
@@ -1126,12 +1173,18 @@ def main():
                 "amcl_initial_y",
                 "amcl_initial_yaw",
                 "seed_from_raw_odom",
+                "seed_require_team",
+                "seed_explicit_team",
+                "operator_inputs_only",
                 "map_save_dir",
             }
             if any(value.split(":=")[0] in protected for value in extra):
                 raise ValueError("workflow-owned launch arguments cannot be overridden")
+            ensure_stack_stopped()
             launch = ["ros2", "launch", "thornbots_pkg", "auto.launch.py"]
             if args.command == "mapping":
+                if not args.room:
+                    field_start(args, extra)
                 session.mkdir(parents=True, exist_ok=False)
                 launch += [
                     "localization_mode:=mapping",
@@ -1146,7 +1199,10 @@ def main():
                 room_mode = manifest.get("frame_mode") == "room"
                 if args.rf2o and room_mode:
                     raise ValueError("room bundles always use raw wheel passthrough; drop --rf2o")
+                args.room = room_mode
                 x, y, yaw = manifest["initial_root"]
+                if not room_mode:
+                    x, y, yaw = field_start(args, extra)
                 launch += [
                     "localization_mode:=amcl",
                     "autosave_map:=false",
@@ -1157,6 +1213,10 @@ def main():
                     f"amcl_initial_y:={y}",
                     f"amcl_initial_yaw:={yaw}",
                 ]
+            room_mode = getattr(args, "room", False)
+            launch.append(f"seed_require_team:={str(not (room_mode or args.no_referee)).lower()}")
+            if args.no_referee:
+                launch.append(f"seed_explicit_team:={args.team}")
             ensure_stack_stopped()
             run_stack(args, session, launch + extra)
         if args.command != "preflight":
