@@ -27,3 +27,14 @@ rf2o_laser_odometry:
     failed_variance_rate: 0.05   # m^2 per second spent failed
     max_failed_variance: 1.0     # m^2
     recovery_matches: 20         # good matches to shed the failed variance
+
+    # Parked, match each scan against an earlier one from the same head
+    # angle instead of the scan before it, so match noise stops integrating
+    # (T39). Parked: /odom within reference_still_distance for
+    # reference_still_time, longer than the drift suite's 1 s corner dwells.
+    # References drop once rf2o moves reference_max_offset (a shove).
+    reference_scans: true
+    reference_still_distance: 0.005  # m; parked MCB odom wandered 2.3 mm in 274 s
+    reference_still_time: 2.0        # s
+    reference_max_offset: 0.02       # m
+    reference_max_yaw: 0.035         # rad of head swing from a reference
