@@ -188,13 +188,18 @@ points on every pyramid level read as zero motion.
 Parked, scan-to-scan matching still integrated match noise, the EKF
 followed `/scan_odom`, and AMCL never updates a parked robot. With
 `reference_scans` (rf2o's [README](../rf2o_laser_odometry/README.md)) a
-parked scan matches an earlier one from the same head angle instead. That
+parked scan matches one bounded-age anchor through the stamped head offset. That
 anchors the pose without trusting the wheels, so a shove still moves it
 (`parked_push`, [drift suite](../sim/README.md#localization-drift-suite)).
 References apply only once `/odom` has held still for 2 s. Kept while
 driving slowly, they matched across up to 5 cm, read short and raised AMCL
 drift-suite corrections. Measurements:
 [T39 investigation](../docs/investigations/t39-parked-drift-2026-10-25.md).
+The follow-up bounds anchor age at 7.5 s and discards degraded anchors.
+This enablement remains held for a
+3-minute robot park with pedestrian crossings, match-like head panning and
+a measured hand shove; see the acceptance procedure in
+[localization #18](https://github.com/Thornbots/sentry_localization/pull/18).
 
 ### config/amcl.yaml
 
