@@ -196,10 +196,61 @@ driving slowly, they matched across up to 5 cm, read short and raised AMCL
 drift-suite corrections. Measurements:
 [T39 investigation](../docs/investigations/t39-parked-drift-2026-10-25.md).
 The follow-up bounds anchor age at 7.5 s and discards degraded anchors.
-This enablement remains held for a
-3-minute robot park with pedestrian crossings, match-like head panning and
-a measured hand shove; see the acceptance procedure in
-[localization #18](https://github.com/Thornbots/sentry_localization/pull/18).
+This enablement remains draft/held in
+[localization #18](https://github.com/Thornbots/sentry_localization/pull/18)
+until the following robot acceptance passes and a human reviews the evidence.
+
+#### Robot parked acceptance
+
+1. Build the improved rf2o follow-up and this config on the sentry; record
+   exact package SHAs and active rf2o parameters. Use the normal top-level
+   stack with `use_rf2o:=true` in an operator-controlled, cleared test area.
+2. Bag `/scan_odom`, `/scan_odom/quality`, `/odom`, `/localization/odom`,
+   `/scan`, `/scan_raw`, `/tf` and `/tf_static`. Run the
+   [room screening](https://github.com/Thornbots/thornbots_pkg/pull/26) tool alongside
+   it for 180 s with rf2o and localization required. Retain its observations
+   and output with the bag and independent motion measurements.
+3. Park for at least 180 s with repeated pedestrian crossings, including
+   someone present at anchor capture who then leaves. Pan at measured
+   competition speed in **both directions**, including full patrol turns,
+   back-and-forth sweeps, angle revisits and anchor refreshes. Record actual
+   head angular speed and timestamps; the scripted sim patrol rate is not
+   a calibrated competition rate.
+4. With wheels held and `/odom` confirming a still wheel prior, apply a
+   measured slow shove **under 4 cm/s** (target about 3.5 cm/s), with about
+   4 cm total displacement. Measure the chassis position over time
+   independently of localization to establish speed and the full XY
+   displacement vector; mark the shove and settling intervals in the bag.
+   Keep the head panning during the shove. A fast hand bump does not satisfy
+   this test of slow motion hidden from the wheels.
+5. Outside the intentional shove/settling interval, calculate every
+   consecutive stamped `/scan_odom` XY step: require <=5 mm and compare the
+   maximum with the prior sim worst of about **2.3 mm** (2.266 mm). Require
+   maximum displacement from the park origin **<=3 cm** for both
+   `/scan_odom` and the localized root pose. Report steps around crossings,
+   reversals and anchor refreshes separately. During shove/settling, require
+   both displacement vectors to agree with the independent measurement
+   within 1 cm; report this interval separately from stationary bounds.
+6. Reject failed matches, missing scan increments, stale TF, stamp/clock
+   errors, coverage gaps or wheel fallback that hides a bad match. Retain
+   the bag, step/displacement calculations, measured shove/head speeds and
+   SHAs for review. A default room screening pass alone does not enforce
+   these panning, step and shove criteria.
+
+The real A2M8 acquires one revolution over roughly **100 ms**. Head motion
+during that interval skews the scan: its rays were measured at different
+head poses. Gazebo captures all rays simultaneously, so its timing fields
+do not reproduce that motion skew; see
+[lidar model limits](../sim/README.md#lidar-format-and-model-limits).
+The stamped head transform compensates the scan-to-anchor mount offset,
+but a single anchor and one transform per scan cannot remove within-scan
+motion distortion. Bounded anchor age and quality rejection limit exposure;
+they do not establish real-sensor robustness during fast panning. The robot
+test must establish it before enablement can merge. A still wheel prior
+also cannot establish a still chassis: an anchor may contain a pedestrian
+or mask slow translation until it is replaced. The crossing and wheels-held
+slow-shove checks must show that anchoring neither jumps on scene changes
+nor suppresses real displacement.
 
 ### config/amcl.yaml
 
