@@ -429,7 +429,8 @@ the team must match those assumptions separately before autonomous use.
 
 ### Field-day card — keep the robot parked at its start for steps 2, 4 and 5
 
-1. Stop the existing robot service/launch. In a sourced robot-container terminal,
+1. Stop the existing robot service with `sudo systemctl stop thornbots`
+   (or stop the manual launch). In a sourced robot-container terminal,
    choose a **new** session and start mapping (keep this terminal open):
    `export SESSION=/workspaces/isaac_ros-dev/maps/oct31-red-01`
    then `ros2 run sentry_localization operator_workflow mapping "$SESSION"`.
@@ -439,7 +440,7 @@ the team must match those assumptions separately before autonomous use.
    ([broad-field coverage](#broad-field-coverage)). Before crossing rough or
    raised ground: `ros2 run sentry_localization operator_workflow pause "$SESSION"`.
    Stop on level ground, let the chassis settle, then `... resume "$SESSION"`
-   and sweep the head while parked. Return to the captured start, park the
+   and keep the head centred and still. Return to the captured start, park the
    chassis and head, and inspect coverage/loop closure and scan/wall overlap.
    Save **before stopping mapping**:
    `ros2 run sentry_localization operator_workflow save "$SESSION"`.
@@ -541,7 +542,7 @@ stamped map/root/lidar TF. A timeout prints observed and expected pose and says
 when the robot is away from its start. This is filter convergence, not an
 independent proof of field accuracy. RViz wall/scan inspection remains required.
 
-For a longer parked/head-slew check in another terminal:
+For a longer parked check in another terminal (keep the real head centred):
 `ros2 run sentry_localization operator_workflow convergence "$SESSION" --hold 30 --samples 20 --max-distance 0.15 --max-std 0.15`.
 `check "$SESSION"` and `preflight` are also available separately. Each successful
 step prints its next command. For simulation add `--sim-time` to mapping,
@@ -572,9 +573,22 @@ records the validated sim route, coverage, input choices and remaining limits.
 
 Use level, parked observation stations around rough ground. Pause scan insertion
 before a rough transfer, drive using the existing controls, stop on level ground,
-and let the chassis settle before resuming. Sweep the head while parked to fill
-its blind sector, checking that scans remain on mapped walls. Maintain overlapping
-views; long unobserved transfers leave wheel slip for the next match to recover.
+and let the chassis settle before resuming. On the real robot, keep the head
+centred and still while mapping: the Oct 25 rehearsal measured head-turn-dependent
+map shifts and the lidar mount remains under investigation. Old workflow prompts suggesting a parked head
+sweep are not hardware acceptance guidance. Both workflow modes launch the full
+`auto.launch.py` graph (without YOLO), including CV aim/patrol by default. For
+manual mapping/localization append `enable_cv_target_bridge:=false
+ enable_target_selector:=false enable_target_tracker:=false patrol_enabled:=false`
+(on one command line). These flags suppress Jetson head commands; they do not
+lock the firmware gimbal. At pinned MCBV3 `8d46da5`, select controller left MID
+(out of automatic aim/fire) and right MID (manual no-spin), centre with the
+right stick and leave it neutral; verify the head stays still. Keep the controller
+on and avoid keyboard/autonomous modes during acceptance. `patrol_enabled:=false`
+alone still permits target aim. Draft workspace #100 removes patrol; recheck the
+flags and firmware controls when adopting it. Fill coverage gaps by moving between
+level stations with overlapping views, checking that scans stay on mapped walls.
+Long unobserved transfers leave wheel slip for the next match to recover.
 Reduced speed alone did not make the simulated rough crossings reliable.
 
 `pause "$SESSION"` and `resume "$SESSION"` set slam_toolbox's scan insertion.
