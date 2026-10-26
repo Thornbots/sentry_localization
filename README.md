@@ -576,7 +576,17 @@ before a rough transfer, drive using the existing controls, stop on level ground
 and let the chassis settle before resuming. On the real robot, keep the head
 centred and still while mapping: the Oct 25 rehearsal measured head-turn-dependent
 map shifts and the lidar mount remains under investigation. Old workflow prompts suggesting a parked head
-sweep are not hardware acceptance guidance. Fill coverage gaps by moving between
+sweep are not hardware acceptance guidance. Both workflow modes launch the full
+`auto.launch.py` graph (without YOLO), including CV aim/patrol by default. For
+manual mapping/localization append `enable_cv_target_bridge:=false
+ enable_target_selector:=false enable_target_tracker:=false patrol_enabled:=false`
+(on one command line). These flags suppress Jetson head commands; they do not
+lock the firmware gimbal. At pinned MCBV3 `8d46da5`, select controller left MID
+(out of automatic aim/fire) and right MID (manual no-spin), centre with the
+right stick and leave it neutral; verify the head stays still. Keep the controller
+on and avoid keyboard/autonomous modes during acceptance. `patrol_enabled:=false`
+alone still permits target aim. Draft workspace #100 removes patrol; recheck the
+flags and firmware controls when adopting it. Fill coverage gaps by moving between
 level stations with overlapping views, checking that scans stay on mapped walls.
 Long unobserved transfers leave wheel slip for the next match to recover.
 Reduced speed alone did not make the simulated rough crossings reliable.
