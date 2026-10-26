@@ -429,7 +429,8 @@ the team must match those assumptions separately before autonomous use.
 
 ### Field-day card — keep the robot parked at its start for steps 2, 4 and 5
 
-1. Stop the existing robot service/launch. In a sourced robot-container terminal,
+1. Stop the existing robot service with `sudo systemctl stop thornbots`
+   (or stop the manual launch). In a sourced robot-container terminal,
    choose a **new** session and start mapping (keep this terminal open):
    `export SESSION=/workspaces/isaac_ros-dev/maps/oct31-red-01`
    then `ros2 run sentry_localization operator_workflow mapping "$SESSION"`.
