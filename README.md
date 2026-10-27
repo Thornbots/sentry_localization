@@ -427,16 +427,28 @@ the team must match those assumptions separately before autonomous use.
 
 ## Field-day and room workflow
 
+`operator_workflow` runs the mapping, boot-capture, save, registration and AMCL acceptance steps.
+`$SESSION` names one attempt's folder; choose a new name for every attempt.
+`--room` rehearses without a referee, keeping boot coordinates instead of field registration.
+
 ### Field-day card — keep the robot parked at its start for steps 2, 4 and 5
+
+Before power-on, place the robot on its start mark and keep it still while the
+IMU settles; moving it during settling caused heading drift. After any SWD
+flash, power-cycle the MCB before trusting odometry: a warm reset leaves the
+Pico I2C dead. MCB power-cycling also reboots the Jetson (shared power); re-sync
+the clock, restart the container and begin a new session. Turning the controller
+off during a session invalidates that attempt; keep it on throughout.
 
 1. Stop the existing robot service with `sudo systemctl stop thornbots`
    (or stop the manual launch). In a sourced robot-container terminal,
    choose a **new** session and start mapping (keep this terminal open):
    `export SESSION=/workspaces/isaac_ros-dev/maps/oct31-red-01`
    then `ros2 run sentry_localization operator_workflow mapping "$SESSION"`.
-2. In a second terminal, set the same `SESSION`, then capture **before moving**:
+2. In a second terminal, set the same `SESSION`; check head yaw ≈ 0 with
+   `ros2 run tf2_ros tf2_echo root head` (Ctrl-C after checking), then capture **before moving**:
    `ros2 run sentry_localization operator_workflow boot-pose "$SESSION"`.
-3. Map with existing operator controls, covering the whole field
+3. Drive ≤0.2 m/s with the head still, covering the whole field
    ([broad-field coverage](#broad-field-coverage)). Before crossing rough or
    raised ground: `ros2 run sentry_localization operator_workflow pause "$SESSION"`.
    Stop on level ground, let the chassis settle, then `... resume "$SESSION"`
@@ -474,8 +486,11 @@ The same warning prints if the launch exits on its own.
 An explicit save validates fresh occupancy data and serialize service success,
 then atomically installs PGM/YAML plus nonempty `.posegraph/.data` and boot data.
 Saving requires the live mapping session ID and a fresh `map->root` within
-0.15 m/0.15 rad of captured boot. Keep parked throughout saving. Occupancy and
-graph are sequential snapshots, not one transactional SLAM snapshot.
+0.15 m/0.15 rad of captured boot. This is SLAM's pose, not raw odometry.
+Return to the boot mark and heading because boot anchors map registration and
+the AMCL start; saving away from it breaks that provenance. Keep parked
+throughout saving. Occupancy and graph are sequential snapshots, not one
+transactional SLAM snapshot.
 
 No operator odometry seed is accepted. Mapping and localize default to raw wheel
 passthrough in `nav_odom`; it needs no seed. On the level-station sim map, raw
