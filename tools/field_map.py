@@ -169,7 +169,7 @@ def main():
     parser.add_argument('yaml', type=Path, help='existing map metadata and image canvas')
     parser.add_argument('world', type=Path, help='sim/world/ARCC_Field_2026.sdf')
     parser.add_argument('out_pgm', type=Path)
-    parser.add_argument('--z', type=float, default=0.3543931)
+    parser.add_argument('--z', type=float, default=0.357296694)
     parser.add_argument('--grow', type=int, default=1)
     args = parser.parse_args()
     meta = yaml.safe_load(args.yaml.read_text())

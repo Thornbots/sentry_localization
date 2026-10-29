@@ -481,8 +481,9 @@ free and occupied thresholds. YAML metadata stays unchanged.
 
 `tools/field_map.py` continues the CAD-slice workflow from the held map draft,
 reading collision poses/scales from the SDF instead of duplicating placement.
-It slices at nominal lidar z = 0.3543931 m (estimated root height
-approximately 0.0093 m plus URDF mount 0.3450931 m), flood fills the field
+It slices at nominal sim lidar z = 0.357296694 m (the 2026-10-26 CAD's
+0.368796694 m root-relative FOV reference minus the simulation's estimated
+0.0115 m suspension sag), flood fills the field
 interior from (0, 0), keeps surfaces bordering that interior,
 and grows occupied cells by one cell to cover raster discretization.
 Plane intersections use a 1e-7 m tolerance to classify on-plane vertices and
@@ -501,7 +502,7 @@ No extra runtime dependency is needed to load the shipped PGM assets.
 With those dependencies available, regenerate from this package:
 
 ```bash
-python3 tools/field_map.py map/clean_map.yaml ../sim/world/ARCC_Field_2026.sdf map/clean_map.pgm --z 0.3543931 --grow 1
+python3 tools/field_map.py map/clean_map.yaml ../sim/world/ARCC_Field_2026.sdf map/clean_map.pgm --z 0.357296694 --grow 1
 python3 -m pytest test/test_field_map.py
 ```
 
