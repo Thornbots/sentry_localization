@@ -40,7 +40,7 @@ class ActualFieldTest(unittest.TestCase):
         field_map.validate_metadata(meta)
         with Image.open(ROOT / 'map' / meta['image']) as image:
             saved = np.asarray(image)
-        generated = field_map.rasterize(self.triangles, .3543931, meta['resolution'],
+        generated = field_map.rasterize(self.triangles, .357296694, meta['resolution'],
                                         meta['origin'][:2], saved.shape, grow=1)
         np.testing.assert_array_equal(saved, generated)
 
