@@ -75,11 +75,6 @@ public:
       std::shared_ptr<rmw_request_id_t> header, std::shared_ptr<SaveMap::Request> request) {
         save_now(header, request);
       });
-    watchdog_ = create_wall_timer(std::chrono::milliseconds(100), [this]() {
-        if (explicit_ && !explicit_->responded && since(explicit_->started) >= timeout_s_) {
-          respond(false, "serialization timed out; saver busy until backend finishes");
-        }
-      });
     if (!get_parameter("periodic_enabled").as_bool()) {
       serialize_ = create_client<SerializePoseGraph>("/slam_toolbox/serialize_map");
       subscribe_map();
@@ -114,7 +109,7 @@ private:
     nav_msgs::msg::OccupancyGrid::ConstSharedPtr map;
     Clock::time_point started;
     int64_t minimum_stamp;
-    bool validated, responded = false;
+    bool validated;
   };
 
   void subscribe_map()
@@ -148,30 +143,29 @@ private:
 
   void respond(bool success, const std::string & message)
   {
-    SaveMap::Response response;
-    response.success = success;
-    response.message = message;
-    explicit_->responded = true;
-    save_service_->send_response(*explicit_->header, response);
-  }
-
-  void cleanup_explicit()
-  {
+    // A completed response guarantees cleanup has finished and the saver is available again.
+    const auto header = explicit_->header;
     std::error_code error;
     std::filesystem::remove_all(explicit_->stage, error);
     explicit_.reset();
+    SaveMap::Response response;
+    response.success = success && !error;
+    response.message = error ? message + "; staging cleanup failed: " + error.message() : message;
+    save_service_->send_response(*header, response);
   }
 
   void finish_explicit(rclcpp::Client<SerializePoseGraph>::SharedFuture future)
   {
-    if (explicit_->responded) {
-      cleanup_explicit();
-      return;
-    }
+    // The backend cannot be cancelled: even a timed-out write must finish before cleanup.
+    bool success = false;
+    std::string message;
     try {
       const auto result = future.get();
-      if (!result || result->result != 0 || since(explicit_->started) >= timeout_s_) {
-        throw std::runtime_error("serialize_map failed or exceeded timeout");
+      if (since(explicit_->started) >= timeout_s_) {
+        throw std::runtime_error("serialization timed out");
+      }
+      if (!result || result->result != 0) {
+        throw std::runtime_error("serialize_map failed");
       }
       validate_map(*explicit_->map, explicit_->minimum_stamp);
       const auto base = (explicit_->stage / "map").string();
@@ -210,11 +204,12 @@ private:
       if (renamed != 0) {
         throw std::runtime_error("cannot publish snapshot: destination exists or rename failed");
       }
-      respond(true, "saved " + explicit_->target.string());
+      success = true;
+      message = "saved " + explicit_->target.string();
     } catch (const std::exception & error) {
-      respond(false, error.what());
+      message = error.what();
     }
-    cleanup_explicit();
+    respond(success, message);
   }
 
   void save_now(
@@ -263,7 +258,6 @@ private:
         [this](rclcpp::Client<SerializePoseGraph>::SharedFuture f) {finish_explicit(f);});
     } catch (const std::exception & error) {
       respond(false, error.what());
-      cleanup_explicit();
     }
   }
 
@@ -325,7 +319,6 @@ private:
 
   std::unique_ptr<ExplicitSave> explicit_;
   rclcpp::Service<SaveMap>::SharedPtr save_service_;
-  rclcpp::TimerBase::SharedPtr watchdog_;
   int64_t started_stamp_;
   double timeout_s_, max_age_s_;
   std::string base_;

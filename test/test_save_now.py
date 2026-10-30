@@ -162,7 +162,7 @@ def test_reset_stamp_rejects_cached_map(saver, tmp_path):
 
 
 def test_timeout_and_busy(saver, tmp_path):
-    """Timeout responds promptly, retains exclusion, and cleans up on a late reply."""
+    """Timeout retains exclusion and cleans up before responding to a late reply."""
     node, behavior, request, wait, _ = saver
     behavior['delay'] = 1.0
     client = node.create_client(SaveMap, '/map_autosaver/save_now')
@@ -178,7 +178,7 @@ def test_timeout_and_busy(saver, tmp_path):
     assert 'timed out' in first.result().message
     assert not second.result().success
     assert 'busy' in second.result().message
-    wait(lambda: not list(tmp_path.glob('.mapping-*')))
+    assert not list(tmp_path.glob('.mapping-*'))
     assert not (tmp_path / 'snapshot').exists()
     assert not (tmp_path / 'other').exists()
     behavior['delay'] = 0.0
