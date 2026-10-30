@@ -455,12 +455,18 @@ correction and slam_toolbox's correction stack on the same lidar data.
 
 For direct launches, `initial_x/y` seed the navigation EKF in firmware odometry coordinates. AMCL
 uses independent `amcl_initial_x/y/yaw`; x/y default to `initial_x/y`, yaw to
-zero for compatibility. A measured field start belongs only in AMCL. Feeding
+zero because `root` is heading-fixed. A measured field start belongs only in AMCL. Feeding
 it to EKF can make `mcb_relay` reset firmware navigation to the wrong position.
 Raw odometry and its constants remain unchanged. `root` has identity raw yaw;
 chassis heading is the separate `chassis_yaw` joint. Field root yaw is measured
 chassis heading minus the captured boot chassis heading, not chassis heading
-itself. Team never mirrors coordinates implicitly.
+itself. Both teams boot with chassis heading π/2 (+y), at red (-4.625, 0)
+and blue (4.625, 0); both root yaws remain zero. The field axes stay +x toward
+blue base, +y left, with CCW positive yaw. Team never mirrors coordinates implicitly.
+The current [UART POSE](../ros2_dji_serial_bridge/UART_PROTOCOL.md#proposed-pose-chassis-yaw)
+omits chassis yaw, so its zero placeholder cannot validate this boot heading.
+Field alignment rejects such captures; preserve recorded boot telemetry and
+recapture after valid chassis-yaw telemetry is available.
 
 On a different field, the measured start may differ from firmware `START_X` /
 `START_Y`. The [operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow) enables
