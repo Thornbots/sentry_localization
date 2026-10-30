@@ -162,12 +162,24 @@ private:
     explicit_.reset();
   }
 
+  void finish_response(bool success, const std::string & message)
+  {
+    const auto header = explicit_->header;
+    SaveMap::Response response;
+    response.success = success;
+    response.message = message;
+    cleanup_explicit();
+    save_service_->send_response(*header, response);
+  }
+
   void finish_explicit(rclcpp::Client<SerializePoseGraph>::SharedFuture future)
   {
     if (explicit_->responded) {
       cleanup_explicit();
       return;
     }
+    bool success = false;
+    std::string message;
     try {
       const auto result = future.get();
       if (!result || result->result != 0 || since(explicit_->started) >= timeout_s_) {
@@ -210,11 +222,12 @@ private:
       if (renamed != 0) {
         throw std::runtime_error("cannot publish snapshot: destination exists or rename failed");
       }
-      respond(true, "saved " + explicit_->target.string());
+      success = true;
+      message = "saved " + explicit_->target.string();
     } catch (const std::exception & error) {
-      respond(false, error.what());
+      message = error.what();
     }
-    cleanup_explicit();
+    finish_response(success, message);
   }
 
   void save_now(
@@ -262,8 +275,7 @@ private:
       serialize_->async_send_request(serialize,
         [this](rclcpp::Client<SerializePoseGraph>::SharedFuture f) {finish_explicit(f);});
     } catch (const std::exception & error) {
-      respond(false, error.what());
-      cleanup_explicit();
+      finish_response(false, error.what());
     }
   }
 
