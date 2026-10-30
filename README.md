@@ -77,6 +77,49 @@ Other args:
   EKF and, by default, AMCL only. Loading at a nonzero field spawn still needs
   [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
 
+### Explicit mapping snapshots
+
+Mapping always starts `map_autosaver`, including with `autosave_map:=false`.
+Its `periodic_enabled` parameter receives `autosave_map`; the periodic directory,
+interval and overwrite behavior above are unchanged. Explicit saves use
+`sentry_localization/srv/SaveMap` at `/map_autosaver/save_now`:
+
+```srv
+string directory
+bool validated
+builtin_interfaces/Time minimum_stamp
+---
+bool success
+string message
+```
+
+The caller supplies a new `session/snapshot` or `session/incomplete-<id>`
+directory and a nonzero ROS timestamp at session start or the latest SLAM reset.
+The cached map must be at least that new, at least as new as saver startup,
+and within `max_map_age_s` (30 seconds) of the current ROS clock. The map frame,
+dimensions, resolution, planar origin quaternion and occupancy values must be
+valid and at least one cell known. A reset caller must advance `minimum_stamp`;
+the saver cannot infer a SLAM reset from occupancy messages alone.
+
+The caller owns parked-at-start validation, session identity, boot metadata and
+any motion stop. `validated` only records that caller verdict in `save.json`.
+The saver owns asynchronous `/slam_toolbox/serialize_map`, nonempty regular
+`map.posegraph`/`map.data` checks and verified PGM/YAML generated through
+`map_image`. It stages all five files in a private sibling directory, then
+atomically renames without replacing any destination, even an empty directory.
+It does not copy `boot.json`; the caller attaches its own metadata after success.
+Serialized graph syntax is opaque here; SLAM deserialization remains a separate
+consumer check.
+
+Missing services/maps, existing outputs, overlapping periodic/explicit requests,
+and invalid data return `success=false` with a diagnostic. Serialization has a
+wall-clock `serialize_timeout_s` (60 seconds) deadline. A timeout responds with
+failure and leaves the saver busy until the backend eventually replies, then
+removes the abandoned staging directory. The service cannot cancel backend
+writes; hidden staging directories can remain after process shutdown and are
+never published as successful snapshots. Explicit directories are separate from
+periodic backups. Backends and noise parameters are unchanged.
+
 Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_pose_publisher` (math in
 `map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/src/mcb_relay.cpp` compares
 `/localization/odom` with raw `/odom` plus its last sent navigation offset.
@@ -90,7 +133,9 @@ It reads these `config/*.yaml` files from `install/`, so rebuild with
 
 `colcon test --packages-select sentry_localization` runs the ament copyright,
 flake8 and pep257 checks on `launch/`, plus gtest unit tests for
-`map_pose_core` and `map_image`, and the standalone [field-map tests](#saved-map).
+`map_pose_core` and `map_image`, the fake-backend `test_save_now` service suite
+(success, validation, output collisions, reset stamps, timeout/busy), and the
+standalone [field-map tests](#saved-map).
 
 ## Notes
 

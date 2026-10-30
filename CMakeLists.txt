@@ -10,6 +10,10 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(builtin_interfaces REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME} "srv/SaveMap.srv"
+  DEPENDENCIES builtin_interfaces)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -48,6 +52,9 @@ ament_target_dependencies(map_pose_publisher geometry_msgs nav_msgs rclcpp tf2 t
 add_executable(map_autosaver src/map_autosaver.cpp)
 target_link_libraries(map_autosaver ${PROJECT_NAME}_core)
 ament_target_dependencies(map_autosaver nav_msgs rclcpp slam_toolbox)
+rosidl_get_typesupport_target(save_map_typesupport ${PROJECT_NAME} rosidl_typesupport_cpp)
+target_link_libraries(map_autosaver "${save_map_typesupport}")
+ament_export_dependencies(rosidl_default_runtime)
 
 install(TARGETS ${PROJECT_NAME}_core
   EXPORT export_${PROJECT_NAME}
@@ -65,6 +72,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_pep257 REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_save_now test/test_save_now.py TIMEOUT 90
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    ENV "PYTEST_ADDOPTS=-p no:anyio")
   ament_add_pytest_test(test_seeded_ekf test/test_seeded_ekf.py TIMEOUT 30
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     ENV "PYTEST_ADDOPTS=-p no:anyio")

@@ -265,9 +265,11 @@ def generate_launch_description():
         name='map_autosaver',
         output='screen',
         condition=IfCondition(PythonExpression(
-            ["'", localization_mode, "' == 'mapping' and '",
-             LaunchConfiguration('autosave_map'), "' == 'true'"])),
+            ["'", localization_mode, "' == 'mapping'"])),
         parameters=[{
+            'use_sim_time': use_sim_time,
+            'periodic_enabled': ParameterValue(
+                LaunchConfiguration('autosave_map'), value_type=bool),
             'save_dir': LaunchConfiguration('map_save_dir'),
             'period_s': ParameterValue(
                 LaunchConfiguration('map_save_period_s'), value_type=float),
