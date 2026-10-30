@@ -113,12 +113,10 @@ consumer check.
 
 Missing services/maps, existing outputs, overlapping periodic/explicit requests,
 and invalid data return `success=false` with a diagnostic. Serialization has a
-wall-clock `serialize_timeout_s` (60 seconds) acceptance deadline. A timeout
-rejects the snapshot, but the failure response waits until the backend replies
-and the abandoned staging directory is removed. All completed requests clean up
-before responding; cleanup errors are reported as failures. The service cannot
-cancel backend writes, so a backend that never replies keeps the request pending
-and the saver busy. Hidden staging directories can remain after shutdown and are
+wall-clock `serialize_timeout_s` (60 seconds) deadline. A timeout responds with
+failure and leaves the saver busy until the backend eventually replies, then
+removes the abandoned staging directory. The service cannot cancel backend
+writes; hidden staging directories can remain after process shutdown and are
 never published as successful snapshots. Explicit directories are separate from
 periodic backups. Backends and noise parameters are unchanged.
 
