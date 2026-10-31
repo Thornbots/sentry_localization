@@ -21,6 +21,11 @@
 
 namespace sentry_localization
 {
+// TEMPORARY spooky scrim start (unmeasured, not good); restore or measure before the next
+// event, see docs/ROADMAP.md. Matches firmware START_X/START_Y; y is not mirrored.
+constexpr double kStartX = 3.53;
+constexpr double kStartY = -0.426;
+
 // Latch the first valid referee team for this run; never guess from a zero ID.
 class NavigationOffset
 {
@@ -29,14 +34,16 @@ public:
   : require_zero_start_(require_team || !explicit_team.empty())
   {
     if (!require_team) {
-      start_x_ = explicit_team.empty() ? 0.0 : (explicit_team == "blue" ? 4.625 : -4.625);
+      start_x_ = explicit_team.empty() ? 0.0 : (explicit_team == "blue" ? kStartX : -kStartX);
+      start_y_ = explicit_team.empty() ? 0.0 : kStartY;
     }
   }
 
   void observe(unsigned int robot_id, bool blue)
   {
     if (robot_id != 0 && !start_x_) {
-      start_x_ = blue ? 4.625 : -4.625;
+      start_x_ = blue ? kStartX : -kStartX;
+      start_y_ = kStartY;
     }
   }
 
@@ -56,6 +63,7 @@ public:
     auto out = raw;
     out.header.frame_id = frame;
     out.pose.pose.position.x += *start_x_;
+    out.pose.pose.position.y += start_y_;
     return out;
   }
 
@@ -63,6 +71,7 @@ private:
   bool require_zero_start_;
   bool started_{false};
   std::optional<double> start_x_;
+  double start_y_{0.0};
 };
 }  // namespace sentry_localization
 #endif  // SENTRY_LOCALIZATION__NAVIGATION_OFFSET_HPP_

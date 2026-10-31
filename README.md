@@ -456,9 +456,10 @@ correction and slam_toolbox's correction stack on the same lidar data.
 
 Raw `/odom` boots at `(0, 0)` for both teams, with field-aligned axes and
 heading-fixed `root` (identity yaw). Navigation adds the team start:
-red `(-4.625, 0)`, blue `(+4.625, 0)`. Both chassis boot headings are π/2
-(+y); chassis heading remains separate from root yaw. Team changes translation,
-never mirrors axes or rotates heading.
+red `(-3.53, -0.426)`, blue `(+3.53, -0.426)` (y is not mirrored; these are
+temporary, unmeasured spooky scrim values, the ARCC start was `(±4.625, 0)`).
+Both chassis boot headings are π/2 (+y); chassis heading remains separate from root yaw.
+Team changes translation, never mirrors axes or rotates heading.
 
 Navigation defaults to `seed_require_team:=true`. The `seeded_ekf` launcher
 waits for the first nonzero `robot_id` on `/dji_serial_bridge/ref_sys`, then
