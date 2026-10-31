@@ -13,29 +13,22 @@
 # limitations under the License.
 
 """
-Launch sentry_localization's map/odom localization stack.
+Launch map->nav_odom backends and the navigation pose estimator.
 
-Two orthogonal axes control localization:
-- localization_mode (slam/mapping/amcl/none) picks who owns map->odom --
-  slam_toolbox, amcl, or nobody (none). This is the map layer.
-- use_rf2o (bool, default true) picks who owns odom->root: raw passthrough
-  of /odom (false), or rf2o's /scan_odom fused with /odom by ekf_node
-  (true). This is independent of localization_mode
-  -- use_rf2o:=true can be layered on top of any localization_mode, including
-  none (the old map-free "ekf mode" configuration).
-Result always published on /localization/odom regardless of backend;
-under slam/mapping/amcl, map_pose_publisher also puts it in the map frame
-on /localization/map_odom.
-load_map:=true (default) loads map_file's saved pose graph at startup.
-See README.md's localization_mode/use_rf2o tables/Notes section for detail.
+use_rf2o selects EKF fusion or raw-pose passthrough in aligned navigation axes.
+Raw odom->root and translation-only nav_odom->odom TF belong to thornbots_pkg.
+The EKF input adapter pins root heading without reading its output TF.
+See README.md for the backend table, frame contract and map loading.
 """
 import os
 
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -56,9 +49,9 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
 
     odom_frame_arg = DeclareLaunchArgument(
-        'odom_frame', default_value='odom',
+        'odom_frame', default_value='nav_odom',
         description='Frame slam_toolbox/amcl/ekf_node treat as their '
-        'drift-free reference, parent of base_frame.'
+        'navigation reference, with axes aligned to raw odom.'
     )
 
     load_map_arg = DeclareLaunchArgument(
@@ -103,18 +96,18 @@ def generate_launch_description():
     )
 
     localization_mode_arg = DeclareLaunchArgument(
-        'localization_mode', default_value='slam',
+        'localization_mode', default_value='amcl',
         choices=['slam', 'mapping', 'amcl', 'none'],
-        description='Selects who owns map->odom -- see the module '
-        'docstring for what each of slam/mapping/amcl/none '
+        description='Selects who owns map->nav_odom -- see the README '
+        'localization_mode table for what each of slam/mapping/amcl/none '
         'actually launches. Independent of use_rf2o, which '
-        'owns odom->root.'
+        'estimates the nav_odom->root navigation pose.'
     )
     use_rf2o_arg = DeclareLaunchArgument(
         'use_rf2o', default_value='true',
-        description='Whether rf2o scan odometry is fused into odom->root '
+        description='Whether rf2o informs the nav_odom->root navigation pose '
         '(rf2o_laser_odometry_node, fused by ekf_node) instead of '
-        'passing /odom through raw. Independent of localization_mode -- '
+        'adding the team offset to raw /odom. Independent of localization_mode -- '
         'layers on top of slam/mapping/amcl/none.'
     )
     localization_mode = LaunchConfiguration('localization_mode')
@@ -130,17 +123,9 @@ def generate_launch_description():
     passthrough_selected = PythonExpression(
         ["'", LaunchConfiguration('use_rf2o'), "' != 'true'"]
     )
-    slam_toolbox_with_map_selected = PythonExpression(
-        ["'", localization_mode, "' in ('slam', 'mapping') and '",
-         LaunchConfiguration('load_map'), "' == 'true'"]
-    )
     slam_toolbox_no_map_selected = PythonExpression(
         ["'", localization_mode, "' == 'mapping' and '",
          LaunchConfiguration('load_map'), "' == 'false'"]
-    )
-    slam_toolbox_selected = PythonExpression(
-        ["'", localization_mode, "' == 'mapping' or ('", localization_mode,
-         "' == 'slam' and '", LaunchConfiguration('load_map'), "' == 'true')"]
     )
     map_selected = PythonExpression(
         ["'", localization_mode, "' != 'none'"]
@@ -155,26 +140,27 @@ def generate_launch_description():
     # Map saving/updating (slam_toolbox's use_map_saver, overriding
     # config/slam.yaml's baked-in value) is only ever enabled in mapping
     # mode -- never a side effect of ordinary localization/amcl/ekf
-    # running, per the module docstring.
+    # running.
     map_yaml_file = PythonExpression(
         ["'", LaunchConfiguration('map_file'), "' + '.yaml'"]
     )
 
-    # FASTRTPS_DEFAULT_PROFILES_FILE forces UDP-only transport (no shared
-    # memory) -- this node has been observed hanging in rcl_node_init/
-    # FastDDS SharedMemTransport::CreateInputChannelResource on startup,
-    # before rclpy.spin() even runs, once /dev/shm accumulates many stale
-    # fastrtps_* segments from earlier SIGKILLed runs -- SIGINT/SIGTERM are
-    # never handled because the hang is below the Python signal-check
-    # point. Same fix as thornbots_pkg's pose_translator/odom_tf_broadcaster
-    # (see config/fastdds_no_shm.xml).
+    # UDP-only FastDDS profile (config/fastdds_no_shm.xml): SharedMemTransport
+    # init was seen hanging at node startup when /dev/shm held stale
+    # fastrtps_* segments from SIGKILLed runs. Same fix as thornbots_pkg's
+    # pose_translator/odom_tf_broadcaster.
     passthrough_odom_node = Node(
         package='sentry_localization',
         executable='passthrough_odom_publisher',
         name='passthrough_odom_publisher',
         output='screen',
         condition=IfCondition(passthrough_selected),
-        parameters=[{'use_sim_time': use_sim_time}],
+        parameters=[{'use_sim_time': use_sim_time,
+                     'navigation_frame': LaunchConfiguration('odom_frame'),
+                     'require_team': ParameterValue(
+                         LaunchConfiguration('seed_require_team'), value_type=bool),
+                     'explicit_team': ParameterValue(
+                         LaunchConfiguration('seed_explicit_team'), value_type=str)}],
         additional_env={
             'FASTRTPS_DEFAULT_PROFILES_FILE': os.path.join(
                 pkg_share, 'config', 'fastdds_no_shm.xml'
@@ -182,10 +168,40 @@ def generate_launch_description():
         },
     )
 
+    scan_navigation_node = Node(
+        package='sentry_localization', executable='passthrough_odom_publisher',
+        name='scan_navigation_publisher', output='screen', condition=IfCondition(ekf_selected),
+        parameters=[{'use_sim_time': use_sim_time,
+                     'navigation_frame': LaunchConfiguration('odom_frame'),
+                     'require_team': ParameterValue(
+                         LaunchConfiguration('seed_require_team'), value_type=bool),
+                     'explicit_team': ParameterValue(
+                         LaunchConfiguration('seed_explicit_team'), value_type=str)}],
+        remappings=[('/odom', '/scan_odom'),
+                    ('/localization/odom', '/localization/scan_odom')],
+    )
+
+    ekf_input_node = Node(
+        package='sentry_localization',
+        executable='ekf_input_publisher',
+        name='ekf_input_publisher',
+        output='screen',
+        condition=IfCondition(ekf_selected),
+        parameters=[{'use_sim_time': use_sim_time,
+                     'navigation_frame': LaunchConfiguration('odom_frame')}],
+        additional_env={'FASTRTPS_DEFAULT_PROFILES_FILE': os.path.join(
+            pkg_share, 'config', 'fastdds_no_shm.xml')},
+    )
+
     def make_ekf(context):
+        arguments = ['--seed-use-sim-time', use_sim_time]
+        if context.launch_configurations['seed_require_team'].lower() == 'true':
+            arguments.append('--require-team')
+        elif context.launch_configurations.get('seed_explicit_team', ''):
+            arguments.extend(['--team', context.launch_configurations['seed_explicit_team']])
         node = Node(
-            package='robot_localization',
-            executable='ekf_node',
+            package='sentry_localization', executable='seeded_ekf',
+            arguments=arguments,
             name='ekf_filter_node',
             output='screen',
             condition=IfCondition(ekf_selected),
@@ -200,18 +216,18 @@ def generate_launch_description():
                     # config/ekf.yaml's comment on world_frame.
                     'world_frame': LaunchConfiguration('odom_frame'),
                     'publish_tf': False,
-                    'initial_state': [
-                        float(context.launch_configurations['initial_x']),
-                        float(context.launch_configurations['initial_y'])] + [0.0] * 13,
                 },
             ],
         )
 
-        return [node]
+        shutdown = RegisterEventHandler(OnProcessExit(
+            target_action=node,
+            on_exit=[EmitEvent(event=Shutdown(reason='EKF process exited'))]))
+        return [shutdown, node]
 
     ekf_node = OpaqueFunction(function=make_ekf)
 
-    # Only used when use_rf2o:=true; nothing else reads /scan_odom.
+    # Only used when use_rf2o:=true; the adapter adds the navigation field offset.
     scan_odom_node = Node(
         package='rf2o_laser_odometry',
         executable='rf2o_laser_odometry_node',
@@ -226,7 +242,7 @@ def generate_launch_description():
             'base_frame_id': 'root',
             'odom_frame_id': LaunchConfiguration('odom_frame'),
             'init_pose_from_topic': '/odom',
-            # The chassis never rotates (ekf.yaml); without this rf2o's
+            # root is heading-fixed (ekf.yaml); without this rf2o's
             # heading drifts and rotates its x/y.
             'fixed_heading': True,
             # Seed each scan match with wheel odometry's motion; rf2o's own
@@ -256,141 +272,85 @@ def generate_launch_description():
         name='map_autosaver',
         output='screen',
         condition=IfCondition(PythonExpression(
-            ["'", localization_mode, "' == 'mapping' and '",
-             LaunchConfiguration('autosave_map'), "' == 'true'"])),
+            ["'", localization_mode, "' == 'mapping'"])),
         parameters=[{
+            'use_sim_time': use_sim_time,
+            'periodic_enabled': ParameterValue(
+                LaunchConfiguration('autosave_map'), value_type=bool),
             'save_dir': LaunchConfiguration('map_save_dir'),
             'period_s': ParameterValue(
                 LaunchConfiguration('map_save_period_s'), value_type=float),
         }],
     )
 
-    map_server_node = Node(
-        package='nav2_map_server',
-        executable='map_server',
-        name='map_server',
-        output='screen',
+    # Construct backend components locally; no load_node RPC can race discovery.
+    amcl_container = Node(
+        package='sentry_localization', executable='seeded_ekf',
+        name='localization_container',
+        arguments=['--seed-use-sim-time', use_sim_time, '--backend', 'amcl'], output='screen',
         condition=IfCondition(amcl_selected),
-        parameters=[{
+        parameters=[amcl_params_file, {
             'use_sim_time': use_sim_time,
             'yaml_filename': map_yaml_file,
-        }],
-    )
-
-    amcl_node = Node(
-        package='nav2_amcl',
-        executable='amcl',
-        name='amcl',
-        output='screen',
-        condition=IfCondition(amcl_selected),
-        parameters=[
-            amcl_params_file,
-            {
-                'use_sim_time': use_sim_time,
-                'odom_frame_id': LaunchConfiguration('odom_frame'),
-                'base_frame_id': 'root',
-                'initial_pose.x': ParameterValue(
-                    LaunchConfiguration('initial_x'), value_type=float),
-                'initial_pose.y': ParameterValue(
-                    LaunchConfiguration('initial_y'), value_type=float),
-                'global_frame_id': 'map',
-                'scan_topic': '/scan',
-            },
-        ],
-    )
-
-    # map_server/amcl are nav2 lifecycle nodes -- they start unconfigured
-    # and inactive on their own; this brings both up automatically
-    # instead of requiring a manual configure/activate service call.
-    amcl_lifecycle_manager_node = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_localization',
-        output='screen',
-        condition=IfCondition(amcl_selected),
-        parameters=[{
-            'use_sim_time': use_sim_time,
+            'odom_frame_id': LaunchConfiguration('odom_frame'),
+            'base_frame_id': 'root',
+            'global_frame_id': 'map',
+            'scan_topic': '/scan',
             'autostart': True,
             'node_names': ['map_server', 'amcl'],
-        }],
-    )
+        }])
 
-    # Two variants of the same node (mirrors sim.launch.py's gz_sim/
-    # gz_sim_headless split): map_file_name is only meaningful to
-    # slam_toolbox when actually set, and launch Node parameter dicts are
-    # static, so load_map:=false needs a version of this node that omits
-    # the key entirely rather than passing it empty. Both are also gated
-    # on localization_mode being slam/mapping -- not launched at all when
-    # localization_mode is amcl/none.
-    slam_toolbox_with_map_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        condition=IfCondition(slam_toolbox_with_map_selected),
-        parameters=[
-            slam_params_file,
-            {
-                'use_sim_time': use_sim_time,
-                'odom_frame': LaunchConfiguration('odom_frame'),
-                'map_file_name': LaunchConfiguration('map_file'),
-                'map_start_pose': [0.0, 0.0, 0.0],
-                'mode': slam_toolbox_mode_param,
-                'use_map_saver': ParameterValue(
-                    mapping_selected, value_type=bool
-                ),
-                'use_lifecycle_manager': True,
-            },
-        ],
-    )
-    slam_toolbox_no_map_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        condition=IfCondition(slam_toolbox_no_map_selected),
-        parameters=[
-            slam_params_file,
-            {
-                'use_sim_time': use_sim_time,
-                'odom_frame': LaunchConfiguration('odom_frame'),
-                # Always mapping: this variant only ever launches when
-                # localization_mode:=mapping (see
-                # slam_toolbox_no_map_selected above) -- there's no saved
-                # map to localize against without load_map anyway.
-                'mode': 'mapping',
-                'use_map_saver': True,
-                'use_lifecycle_manager': True,
-            },
-        ],
-    )
-
-    # slam_toolbox is a lifecycle node since Jazzy (2.8) and starts
-    # unconfigured; same bring-up as amcl's lifecycle manager above.
-    slam_lifecycle_manager_node = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_slam',
-        output='screen',
-        condition=IfCondition(slam_toolbox_selected),
-        parameters=[{
+    def slam_container(condition, load_map, mapping=False):
+        params = {
             'use_sim_time': use_sim_time,
+            'odom_frame': LaunchConfiguration('odom_frame'),
+            'mode': slam_toolbox_mode_param,
+            'use_map_saver': ParameterValue(mapping_selected, value_type=bool),
+            'zero_origin_mapping': mapping and not load_map,
+            'use_lifecycle_manager': True,
             'autostart': True,
             'node_names': ['slam_toolbox'],
-        }],
-    )
+        }
+        if load_map:
+            params.update({
+                'map_file_name': LaunchConfiguration('map_file'),
+                'map_start_pose': [0.0, 0.0, 0.0],
+            })
+        return Node(
+            package='sentry_localization',
+            executable='localization_backend' if mapping else 'seeded_ekf',
+            name='slam_container',
+            arguments=['slam'] if mapping else [
+                '--seed-use-sim-time', use_sim_time, '--backend', 'slam'], output='screen',
+            condition=IfCondition(condition), parameters=[slam_params_file, params])
+
+    slam_with_map_container = slam_container(PythonExpression([
+        "'", localization_mode, "' == 'slam' and '",
+        LaunchConfiguration('load_map'), "' == 'true'"]), True)
+    mapping_with_map_container = slam_container(PythonExpression([
+        "'", localization_mode, "' == 'mapping' and '",
+        LaunchConfiguration('load_map'), "' == 'true'"]), True, mapping=True)
+    slam_no_map_container = slam_container(slam_toolbox_no_map_selected, False, mapping=True)
 
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'initial_x', default_value='0.0', description='Known initial field X, meters'),
-        DeclareLaunchArgument(
-            'initial_y', default_value='0.0', description='Known initial field Y, meters'),
+        DeclareLaunchArgument('seed_from_raw_odom', default_value='true',
+                              description='Compatibility argument; navigation always seeds '
+                              'from fresh raw /odom.'),
+        DeclareLaunchArgument('seed_require_team', default_value='true', choices=['true', 'false'],
+                              description='Wait for actual referee team and raw /odom near '
+                              'zero, then add team start. False allows room navigation. '
+                              'AMCL and saved-map SLAM still require actual referee.'),
+        DeclareLaunchArgument('seed_explicit_team', default_value='', choices=['', 'red', 'blue'],
+                              description='Practice navigation team only when seed_require_team '
+                              'is false; never bypasses map localization referee gate.'),
+        *[DeclareLaunchArgument(name, default_value='0.0',
+                                description='Deprecated; initialization uses raw /odom and team.')
+          for name in ['initial_x', 'initial_y', 'amcl_initial_x', 'amcl_initial_y',
+                       'amcl_initial_yaw']],
         use_sim_time_arg,
         odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
-        passthrough_odom_node, ekf_node,
-        scan_odom_node, map_pose_node, map_autosaver_node,
-        slam_toolbox_with_map_node, slam_toolbox_no_map_node,
-        slam_lifecycle_manager_node,
-        map_server_node, amcl_node, amcl_lifecycle_manager_node,
+        passthrough_odom_node, ekf_input_node, ekf_node,
+        scan_odom_node, scan_navigation_node, map_pose_node, map_autosaver_node,
+        slam_with_map_container, mapping_with_map_container, slam_no_map_container, amcl_container,
     ])

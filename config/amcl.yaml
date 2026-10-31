@@ -6,7 +6,7 @@ amcl:
     # odom_frame launch arg; the values below are just this file's own
     # standalone defaults (e.g. for running amcl directly, outside the
     # launch file).
-    odom_frame_id: odom
+    odom_frame_id: nav_odom
     base_frame_id: root
     global_frame_id: map
     scan_topic: /scan
@@ -34,17 +34,11 @@ amcl:
     update_min_d: 0.1
     update_min_a: 0.05
 
-    # Matches slam_toolbox's map_start_pose: sim's spawn, the field centre.
-    # root is heading-fixed, so yaw is 0 however the chassis faces. On the
-    # robot the MCB boots at its team's start (red (-4.625, 0)), not here.
-    set_initial_pose: true
-    initial_pose:
-      x: 0.0
-      y: 0.0
-      z: 0.0
-      yaw: 0.0
+    # seeded_ekf --backend amcl supplies the first valid referee team's prior.
+    # Direct backend launches have no guessed initial pose.
+    set_initial_pose: false
 
-    # RPLIDAR A2M8 range, matches slam.yaml/lidar_node.
+    # A2M8 range is 0.05-12 m. The 0.15 floor is a margin, as in slam.yaml.
     laser_min_range: 0.15
     laser_max_range: 12.0
 
@@ -72,7 +66,7 @@ amcl:
     beam_skip_error_threshold: 0.9
     beam_skip_threshold: 0.3
     # min/max_particles: 1000/3000 (was 500/2000), a moderate step to damp
-    # map->odom wobble without exceeding max_beams' real-time budget --
+    # map->nav_odom wobble without exceeding max_beams' real-time budget --
     # see README.md Notes for the full tuning history.
     min_particles: 1000
     max_particles: 3000
