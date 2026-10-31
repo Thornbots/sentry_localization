@@ -17,6 +17,10 @@ import sys
 import time
 
 
+# TEMPORARY spooky scrim start (unmeasured, not good); restore or measure before the next event,
+# see docs/ROADMAP.md. Matches firmware START_X/START_Y; red is -START_X, y is not mirrored.
+START_X = 3.53
+START_Y = -0.426
 WAIT_SECONDS = 15.0
 MAX_AGE_SECONDS = 0.5
 
@@ -53,7 +57,7 @@ def wait_for_seed(use_sim_time, require_team=False, explicit_team=None, team_onl
             team = bool(message.is_on_blue_team)
             team_since_ns = node.get_clock().now().nanoseconds
             if team_only:
-                seed = [4.625 if team else -4.625, 0.0] + [0.0] * 13
+                seed = [START_X if team else -START_X, START_Y] + [0.0] * 13
 
     def receive(message):
         nonlocal seed
@@ -66,10 +70,11 @@ def wait_for_seed(use_sim_time, require_team=False, explicit_team=None, team_onl
                 stamp_ns = stamp.sec * 1_000_000_000 + stamp.nanosec
                 if team is None or (require_team and stamp_ns <= team_since_ns):
                     return
-                start_x = 4.625 if team else -4.625
+                start_x = START_X if team else -START_X
                 if math.hypot(candidate[0], candidate[1]) > 0.3:
                     return
                 candidate[0] += start_x
+                candidate[1] += START_Y
             seed = candidate
 
     # Volatile, best effort accepts both reliable and best-effort raw publishers.
@@ -133,10 +138,10 @@ def main(argv=None):
             command.append('--ros-args')
         if options.backend == 'amcl':
             for key, value in {'set_initial_pose': 'true', 'initial_pose.x': seed[0],
-                               'initial_pose.y': 0.0, 'initial_pose.yaw': 0.0}.items():
+                               'initial_pose.y': seed[1], 'initial_pose.yaw': 0.0}.items():
                 command.extend(['-p', f'{key}:={value}'])
         elif options.backend == 'slam':
-            command.extend(['-p', 'map_start_pose:=' + json.dumps([seed[0], 0.0, 0.0])])
+            command.extend(['-p', 'map_start_pose:=' + json.dumps([seed[0], seed[1], 0.0])])
         else:
             command.extend(['-p', 'initial_state:=' + json.dumps(seed)])
         os.execvp(command[0], command)

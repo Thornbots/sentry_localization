@@ -106,7 +106,7 @@ def test_wait_skips_bad_messages_then_seeds_and_cleans_up(monkeypatch):
 
 @pytest.mark.parametrize('blue', [False, True])
 def test_team_gate_adds_start_to_raw_displacement_after_assignment(monkeypatch, blue):
-    start = 4.625 if blue else -4.625
+    start = 3.53 if blue else -3.53
     messages = [
         odom(x=0),
         ('/dji_serial_bridge/ref_sys', NS(robot_id=0, is_on_blue_team=not blue), 10_000_000_000),
@@ -119,7 +119,7 @@ def test_team_gate_adds_start_to_raw_displacement_after_assignment(monkeypatch, 
     ]
     node = fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, require_team=True) == [start + 0.2, -0.1] + [0.0] * 13
+    assert gate.wait_for_seed(False, require_team=True) == [start + 0.2, -0.426 - 0.1] + [0.0] * 13
     assert messages == []
     assert node.destroyed_subscriptions == ['/dji_serial_bridge/ref_sys', '/odom']
     assert node.destroyed
@@ -149,12 +149,12 @@ def test_backend_exec_waits_for_first_valid_team_then_sets_only_team_prior(
     path, command = executed[0]
     assert path == '/overlay/sentry_localization/lib/sentry_localization/localization_backend'
     assert command[1:5] == [backend, *forwarded]
-    start = 4.625 if blue else -4.625
+    start = 3.53 if blue else -3.53
     if backend == 'amcl':
         assert command[5:] == ['-p', 'set_initial_pose:=true', '-p', f'initial_pose.x:={start}',
-                               '-p', 'initial_pose.y:=0.0', '-p', 'initial_pose.yaw:=0.0']
+                               '-p', 'initial_pose.y:=-0.426', '-p', 'initial_pose.yaw:=0.0']
     else:
-        assert command[5:] == ['-p', 'map_start_pose:=' + json.dumps([start, 0.0, 0.0])]
+        assert command[5:] == ['-p', 'map_start_pose:=' + json.dumps([start, -0.426, 0.0])]
 
 
 @pytest.mark.parametrize('backend', [None, 'amcl', 'slam'])
@@ -193,7 +193,7 @@ def test_explicit_practice_team_adds_start_to_raw_seed(monkeypatch):
     messages = [odom(x=0.25)]
     fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, explicit_team='blue')[:2] == [4.875, 0.002]
+    assert gate.wait_for_seed(False, explicit_team='blue')[:2] == pytest.approx([3.78, -0.424])
     assert messages == []
 
 
@@ -316,7 +316,7 @@ def test_required_referee_ignores_conflicting_explicit_practice_team(monkeypatch
     ]
     fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, require_team=True, explicit_team='blue')[0] == -4.625
+    assert gate.wait_for_seed(False, require_team=True, explicit_team='blue')[0] == -3.53
 
 
 def test_valid_referee_without_fresh_raw_seed_times_out_without_ekf(monkeypatch, capsys):
