@@ -96,7 +96,7 @@ def generate_launch_description():
     )
 
     localization_mode_arg = DeclareLaunchArgument(
-        'localization_mode', default_value='slam',
+        'localization_mode', default_value='amcl',
         choices=['slam', 'mapping', 'amcl', 'none'],
         description='Selects who owns map->nav_odom -- see the README '
         'localization_mode table for what each of slam/mapping/amcl/none '

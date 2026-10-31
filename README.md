@@ -34,9 +34,9 @@ The [operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow) 
 | `amcl` | `nav2_amcl` + `nav2_map_server` | particle filter on a saved occupancy grid |
 | `none` | no map frame | odometry only, usually with `use_rf2o:=true` |
 
-`localization.launch.py` defaults to `slam`; `auto.launch.py` defaults to
-`mapping` from a blank map (since 2026-10-02, amcl before), with
-`mcb_relay` still relocalizing from `/localization/odom`.
+`localization.launch.py` and `auto.launch.py` default to `amcl` on
+`map_file` (since 2026-10-30; `auto.launch.py` used `mapping` from
+2026-10-02), with `mcb_relay` still relocalizing from `/localization/odom`.
 
 `use_rf2o` (named `use_ekf` before 2026-09-28) picks the `/localization/odom`
 source, with any mode:
@@ -389,8 +389,7 @@ Every amcl config spread 0.4-1.3m run to run. `kMaxDelta` (in
 `sim/test/localization/localization_suite.cpp`) went from 0.30m to 0.40m, ~25% over
 the worst sample, and the scenarios then present passed reliably.
 
-`auto.launch.py` defaulted to `amcl` from 2026-08-29 and to `mapping` since
-2026-10-02, so pass
+`auto.launch.py` defaults to `amcl`, so pass
 `localization_mode:=slam` to get this configuration.
 
 ### Closed levers
