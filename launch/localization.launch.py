@@ -21,6 +21,7 @@ The EKF input adapter pins root heading without reading its output TF.
 See README.md for the backend table, frame contract and map loading.
 """
 import os
+import signal
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -29,7 +30,8 @@ from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, Reg
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.events.process import SignalProcess
+from launch.substitutions import LaunchConfiguration, PythonExpression, TextSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -130,9 +132,6 @@ def generate_launch_description():
     slam_toolbox_no_map_selected = PythonExpression(
         ["'", localization_mode, "' == 'mapping' and '",
          LaunchConfiguration('load_map'), "' == 'false'"]
-    )
-    map_selected = PythonExpression(
-        ["'", localization_mode, "' != 'none'"]
     )
     backend_pose_topic = PythonExpression(
         ["'/amcl_pose' if '", localization_mode, "' == 'amcl' else '/pose'"]
@@ -247,34 +246,25 @@ def generate_launch_description():
 
     # map->root for mcb_relay; covariance adds the backend's own pose
     # covariance (amcl's /amcl_pose, slam_toolbox's /pose).
-    map_pose_node = Node(
-        package='sentry_localization',
-        executable='map_pose_publisher',
-        name='map_pose_publisher',
-        output='screen',
-        condition=IfCondition(map_selected),
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'backend_pose_topic': backend_pose_topic,
-        }],
-    )
+    # `fix` freezes substitutions to text for nodes launched from event handlers:
+    # the include's launch-configuration scope is gone by the time those run.
+    def map_pose(topic, fix=lambda sub: sub):
+        return Node(
+            package='sentry_localization', executable='map_pose_publisher',
+            name='map_pose_publisher', output='screen',
+            parameters=[{'use_sim_time': fix(use_sim_time), 'backend_pose_topic': topic}])
 
-    map_autosaver_node = Node(
-        package='sentry_localization',
-        executable='map_autosaver',
-        name='map_autosaver',
-        output='screen',
-        condition=IfCondition(PythonExpression(
-            ["'", localization_mode, "' == 'mapping'"])),
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'periodic_enabled': ParameterValue(
-                LaunchConfiguration('autosave_map'), value_type=bool),
-            'save_dir': LaunchConfiguration('map_save_dir'),
-            'period_s': ParameterValue(
-                LaunchConfiguration('map_save_period_s'), value_type=float),
-        }],
-    )
+    def map_saver(fix=lambda sub: sub):
+        return Node(
+            package='sentry_localization', executable='map_autosaver',
+            name='map_autosaver', output='screen',
+            parameters=[{
+                'use_sim_time': fix(use_sim_time),
+                'periodic_enabled': ParameterValue(
+                    fix(LaunchConfiguration('autosave_map')), value_type=bool),
+                'save_dir': fix(LaunchConfiguration('map_save_dir')),
+                'period_s': ParameterValue(
+                    fix(LaunchConfiguration('map_save_period_s')), value_type=float)}])
 
     # Construct backend components locally; no load_node RPC can race discovery.
     amcl_container = Node(
@@ -298,12 +288,13 @@ def generate_launch_description():
             'node_names': ['map_server', 'amcl'],
         }])
 
-    def slam_container(condition, load_map):
+    def slam_container(condition, load_map, mapping=False, fix=lambda sub: sub):
         params = {
-            'use_sim_time': use_sim_time,
-            'odom_frame': LaunchConfiguration('odom_frame'),
-            'mode': slam_toolbox_mode_param,
-            'use_map_saver': ParameterValue(mapping_selected, value_type=bool),
+            'use_sim_time': fix(use_sim_time),
+            'odom_frame': fix(LaunchConfiguration('odom_frame')),
+            'mode': 'mapping' if mapping else slam_toolbox_mode_param,
+            'use_map_saver': True if mapping else ParameterValue(
+                mapping_selected, value_type=bool),
             'use_lifecycle_manager': True,
             'autostart': True,
             'node_names': ['slam_toolbox'],
@@ -315,11 +306,56 @@ def generate_launch_description():
             })
         return Node(
             package='sentry_localization', executable='localization_backend',
-            name='slam_container', arguments=['slam'], output='screen',
-            condition=IfCondition(condition), parameters=[slam_params_file, params])
+            name='slam_container', arguments=['mapping' if mapping else PythonExpression(
+                ["'mapping' if '", localization_mode, "' == 'mapping' else 'slam'"])],
+            output='screen',
+            condition=None if condition is None else IfCondition(condition),
+            parameters=[slam_params_file, params])
 
     slam_with_map_container = slam_container(slam_toolbox_with_map_selected, True)
     slam_no_map_container = slam_container(slam_toolbox_no_map_selected, False)
+
+    def managed_backend(context):
+        mode = localization_mode.perform(context)
+        map_pose_node = map_pose(backend_pose_topic)
+        if mode == 'mapping':
+            return [map_pose_node, map_saver(),
+                    slam_with_map_container, slam_no_map_container]
+        if mode == 'amcl':
+            backend = amcl_container
+        elif mode == 'slam':
+            backend = (slam_with_map_container
+                       if LaunchConfiguration('load_map').perform(context) == 'true'
+                       else slam_no_map_container)
+        else:
+            backend = Node(package='sentry_localization', executable='localization_backend',
+                           arguments=['none'], output='screen')
+        switched = False
+        def fix(sub):
+            return TextSubstitution(text=sub.perform(context))
+        mapping = [slam_container(None, False, mapping=True, fix=fix),
+                   map_pose('/pose', fix), map_saver(fix)]
+
+        def backend_exited(event, context):
+            nonlocal switched
+            if context.is_shutdown or event.returncode != 42:
+                return []
+            switched = True
+            if mode == 'none':
+                return mapping
+            return [EmitEvent(event=SignalProcess(
+                signal_number=signal.SIGINT,
+                process_matcher=lambda action: action is map_pose_node))]
+
+        def pose_exited(event, context):
+            return mapping if switched and not context.is_shutdown else []
+
+        handlers = [RegisterEventHandler(OnProcessExit(
+            target_action=backend, on_exit=backend_exited))]
+        if mode != 'none':
+            handlers += [RegisterEventHandler(OnProcessExit(
+                target_action=map_pose_node, on_exit=pose_exited)), map_pose_node]
+        return handlers + [backend]
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -350,6 +386,5 @@ def generate_launch_description():
                               description='Explicit practice team; check seed position '
                               'without referee.'),
         passthrough_odom_node, ekf_input_node, ekf_node,
-        scan_odom_node, map_pose_node, map_autosaver_node,
-        slam_with_map_container, slam_no_map_container, amcl_container,
+        scan_odom_node, OpaqueFunction(function=managed_backend),
     ])
