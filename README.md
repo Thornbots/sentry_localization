@@ -43,8 +43,8 @@ source, with any mode:
 
 | Value | Source |
 | --- | --- |
-| `false` | `passthrough_odom_publisher`, raw pose in identical navigation axes, labeled `nav_odom` |
-| `true` | `ekf_input_publisher` supplies root velocity/fixed heading; `ekf_node` fuses these with rf2o's `/scan_odom` position |
+| `false` | `passthrough_odom_publisher`, raw pose plus team start, labeled `nav_odom` |
+| `true` | `ekf_input_publisher` supplies root velocity/fixed heading; `ekf_node` fuses these with rf2o's team-offset `/localization/scan_odom` position |
 
 `true` is the default in both this file and `auto.launch.py` (since
 2026-09-20), so the stack runs rf2o + the EKF unless you pass
@@ -73,9 +73,10 @@ Other args:
   (30 s). Not slam_toolbox's `save_map`: its `map_saver_cli` process must
   find `/map` within 2 s, and on the sentry mostly didn't. Load one back
   with `load_map:=true map_file:=<dir>/map`. Saved-map startup currently
-  hard-codes `map_start_pose` to `[0, 0, 0]`; `initial_x`/`initial_y` seed
-  EKF and, by default, AMCL only. Loading at a nonzero field spawn still needs
-  [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
+  uses the actual referee team's start for `slam` localization. Mapping with a
+  saved graph keeps `map_start_pose: [0, 0, 0]`; blank mapping cancels the first
+  navigation pose so its first map pose is also zero. Graph registration on a
+  different field still needs [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
 
 ### Explicit mapping snapshots
 
@@ -133,7 +134,8 @@ It reads these `config/*.yaml` files from `install/`, so rebuild with
 
 `colcon test --packages-select sentry_localization` runs the ament copyright,
 flake8 and pep257 checks on `launch/`, plus gtest unit tests for
-`map_pose_core` and `map_image`, the fake-backend `test_save_now` service suite
+`map_pose_core`, `map_image`, EKF inputs and navigation offsets, the standalone
+seed/team-gate and launch checks, the fake-backend `test_save_now` service suite
 (success, validation, output collisions, reset stamps, timeout/busy), and the
 standalone [field-map tests](#saved-map).
 
@@ -297,7 +299,7 @@ Covariance and process noise are unmeasured starting guesses.
 - `odom0` (`/localization/ekf_input`): fixed root heading, vx, vy. The adapter
   preserves `/odom` capture stamps and root-frame twist, discards raw x/y,
   and defines identity heading directly in navigation axes. It requires no TF.
-- `odom1` (`/scan_odom`, rf2o): x, y. It used to be gated to head-home
+- `odom1` (`/localization/scan_odom`, team-offset rf2o): x, y. It used to be gated to head-home
   windows; since the rf2o fix it streams continuously.
 
 x/y from `/odom` stay out. Wheel slip (the "Bumpy Road" zone, sim's
@@ -452,28 +454,49 @@ correction and slam_toolbox's correction stack on the same lidar data.
 
 ### Initial field position
 
-For direct launches, `initial_x/y` seed the navigation EKF in firmware odometry coordinates. AMCL
-uses independent `amcl_initial_x/y/yaw`; x/y default to `initial_x/y`, yaw to
-zero because `root` is heading-fixed. A measured field start belongs only in AMCL. Feeding
-it to EKF can make `mcb_relay` reset firmware navigation to the wrong position.
-Raw odometry and its constants remain unchanged. `root` has identity raw yaw;
-chassis heading is the separate `chassis_yaw` joint. Field root yaw is measured
-chassis heading minus the captured boot chassis heading, not chassis heading
-itself. Both teams boot with chassis heading π/2 (+y), at red (-4.625, 0)
-and blue (4.625, 0); both root yaws remain zero. The field axes stay +x toward
-blue base, +y left, with CCW positive yaw. Team never mirrors coordinates implicitly.
-The current [UART POSE](../ros2_dji_serial_bridge/UART_PROTOCOL.md#proposed-pose-chassis-yaw)
-omits chassis yaw, so its zero placeholder cannot validate this boot heading;
-[field alignment](../thornbots_pkg/README.md#preparation-and-rationale) trusts
-the π/2 contract until it does.
+Raw `/odom` boots at `(0, 0)` for both teams, with field-aligned axes and
+heading-fixed `root` (identity yaw). Navigation adds the team start:
+red `(-4.625, 0)`, blue `(+4.625, 0)`. Both chassis boot headings are π/2
+(+y); chassis heading remains separate from root yaw. Team changes translation,
+never mirrors axes or rotates heading.
 
-On a different field, the measured start may differ from firmware `START_X` /
-`START_Y`. The [operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow) enables
-`seed_from_raw_odom:=true`, deriving the navigation seed from fresh raw odometry
-before EKF starts; it does not accept a hand-entered seed. Register the map with
-the measured physical pose. This changes only
-map localization. It does not relocate raw CV aim, firmware routes or waypoints;
-the team must match those assumptions separately before autonomous use.
+Navigation defaults to `seed_require_team:=true`. The `seeded_ekf` launcher
+waits for the first nonzero `robot_id` on `/dji_serial_bridge/ref_sys`, then
+fresh raw `/odom` captured after assignment and within 0.3 m of raw zero.
+It initializes EKF with raw x/y plus team start, and all other state entries
+zero. Raw stamps must be nonzero, finite in x/y, no more than 0.5 s old and
+not in the future. Waiting for referee has no deadline; after assignment,
+missing usable odometry fails closed after 15 wall seconds. No EKF runs with
+a guessed team. The first valid team is held for that run; restart bringup
+to change teams.
+
+`use_rf2o:=false` waits for team and a near-zero raw position before publishing
+the same field offset through passthrough. With rf2o enabled, its raw-zero
+`/scan_odom` is offset into `/localization/scan_odom` before EKF fusion, so scan
+position cannot pull navigation back to zero. Input stamps, twist and covariance
+are preserved; `/odom` and rf2o's raw motion priors are unchanged.
+
+The room operator workflow explicitly uses `seed_require_team:=false` with
+`seed_explicit_team:=''`: navigation seeds from raw odometry without a field
+offset. An explicit practice team with `seed_require_team:=false` adds that
+team's start to a near-zero raw seed. These options affect navigation only.
+`seed_from_raw_odom` remains accepted for compatibility; raw seeding is always
+used. The former `initial_x/y` and `amcl_initial_x/y/yaw` launch arguments are
+also accepted but no longer override initialization.
+
+AMCL **always waits for actual REF_SYS**, including in a no-referee room
+workflow. Its process, map server and lifecycle manager do not start before
+the first valid team; startup then sets the team-start prior at root yaw zero.
+There is no default team or global-localization fallback. Saved-map `slam`
+localization uses the same gate and team-start `map_start_pose`. Mapping bypasses
+that field prior: a blank map starts at map `(0, 0, 0)` using the inverse first
+navigation pose as SLAM Toolbox's reprocessing transform; loading a graph for
+mapping retains its zero map start. Navigation can therefore remain field-offset
+while a new map uses a local zero origin.
+
+For another field, register the occupancy map using the
+[operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow).
+Map registration does not relocate raw CV aim, firmware routes or waypoints.
 
 ## Broad-field coverage
 

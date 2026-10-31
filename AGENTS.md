@@ -24,4 +24,4 @@ Sim/bench runs require [approval](../AGENTS.md#containers-and-runs).
 - Fixed-heading rf2o assumes no chassis yaw drift; validate that on hardware.
 - [Field initialization](README.md#initial-field-position) needs hardware validation;
   operator registration supports AMCL occupancy maps; transformed SLAM graphs
-  and the hard-coded zero saved-graph pose remain [track H](../docs/ROADMAP.md#h-slam-at-amcls-level).
+  remain [track H](../docs/ROADMAP.md#h-slam-at-amcls-level).

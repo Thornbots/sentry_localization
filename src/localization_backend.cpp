@@ -77,6 +77,33 @@ private:
   }
 };
 
+// A new mapping session starts at map zero even when nav_odom is field-offset.
+// Saved graphs keep slam_toolbox's existing map_start_pose registration.
+class ZeroOriginSlam : public slam_toolbox::AsynchronousSlamToolbox
+{
+public:
+  explicit ZeroOriginSlam(rclcpp::NodeOptions options)
+  : slam_toolbox::AsynchronousSlamToolbox(options)
+  {
+    declare_parameter("zero_origin_mapping", false);
+  }
+
+protected:
+  karto::LocalizedRangeScan * addScan(
+    karto::LaserRangeFinder * laser,
+    const sensor_msgs::msg::LaserScan::ConstSharedPtr & scan, karto::Pose2 & odom_pose) override
+  {
+    if (!origin_initialized_ && get_parameter("zero_origin_mapping").as_bool()) {
+      reprocessing_transform_ = smapper_->toTfPose(odom_pose).inverse();
+      origin_initialized_ = true;
+    }
+    return slam_toolbox::SlamToolbox::addScan(laser, scan, odom_pose);
+  }
+
+private:
+  bool origin_initialized_{false};
+};
+
 // Static composition keeps lifecycle services local and libraries loaded until exit.
 // Each node has its own executor; see README.md.
 class Backend
@@ -137,7 +164,7 @@ int main(int argc, char ** argv)
       backend.add<nav2_map_server::MapServer>("map_server");
       backend.add<TrackedMountAmcl>("amcl");
     } else {
-      backend.add<slam_toolbox::AsynchronousSlamToolbox>("slam_toolbox");
+      backend.add<ZeroOriginSlam>("slam_toolbox");
     }
     backend.add<nav2_lifecycle_manager::LifecycleManager>(
       args[1] == "amcl" ? "lifecycle_manager_localization" : "lifecycle_manager_slam");
