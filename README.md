@@ -464,9 +464,9 @@ itself. Both teams boot with chassis heading π/2 (+y), at red (-4.625, 0)
 and blue (4.625, 0); both root yaws remain zero. The field axes stay +x toward
 blue base, +y left, with CCW positive yaw. Team never mirrors coordinates implicitly.
 The current [UART POSE](../ros2_dji_serial_bridge/UART_PROTOCOL.md#proposed-pose-chassis-yaw)
-omits chassis yaw, so its zero placeholder cannot validate this boot heading.
-Field alignment rejects such captures; preserve recorded boot telemetry and
-recapture after valid chassis-yaw telemetry is available.
+omits chassis yaw, so its zero placeholder cannot validate this boot heading;
+[field alignment](../thornbots_pkg/README.md#preparation-and-rationale) trusts
+the π/2 contract until it does.
 
 On a different field, the measured start may differ from firmware `START_X` /
 `START_Y`. The [operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow) enables
