@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME} "srv/SaveMap.srv"
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(nav2_amcl REQUIRED)
 find_package(nav2_map_server REQUIRED)
@@ -37,7 +38,7 @@ add_executable(passthrough_odom_publisher src/passthrough_odom_publisher.cpp)
 add_executable(localization_backend src/localization_backend.cpp)
 ament_target_dependencies(localization_backend
   rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox
-  sensor_msgs tf2 tf2_ros)
+  sensor_msgs std_srvs tf2 tf2_ros)
 # slam_toolbox exports its backend libraries separately from its rosidl targets.
 target_link_libraries(localization_backend ${slam_toolbox_LIBRARIES} Boost::serialization TBB::tbb)
 ament_target_dependencies(passthrough_odom_publisher nav_msgs rclcpp)

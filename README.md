@@ -23,6 +23,18 @@ for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
 
 `thornbots_pkg/launch/auto.launch.py` includes `launch/localization.launch.py`.
 Use that robot entrypoint; do not run a second localization launch alongside it.
+
+MMM may request `/localization/start_mapping` (`std_srvs/srv/Trigger`). The
+C++ backend acknowledges the request and exits with code 42 after destroying
+all backend components. A ROS 2 launch `OnProcessExit` handler then stops the
+map-pose adapter and launches a blank mapping backend, its map-pose adapter
+and `map_autosaver`, preserving the launch's time, frame and save settings.
+Process exit is the handoff boundary: the old `map->nav_odom` owner has gone
+before the new one starts. EKF/rf2o and passthrough keep running. No runtime
+Python supervisor or host service restart is involved. Mapping requests are
+idempotent once in mapping. An ordinary backend crash does not start mapping;
+MMM times out and sends 6 if the handoff never becomes usable. Switching is
+one-way for this boot and does not write `launch.env`.
 The [operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow) wraps the same entrypoint.
 
 `localization_mode` picks the `map->nav_odom` owner:

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -26,6 +27,7 @@
 #include "rclcpp_components/node_factory_template.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "slam_toolbox/slam_toolbox_async.hpp"
+#include "std_srvs/srv/trigger.hpp"
 #include "tf2/exceptions.h"
 #include "tf2_ros/buffer.h"
 
@@ -109,12 +111,28 @@ public:
     executors_.push_back(executor);
   }
 
-  void spin()
+  bool spin(bool switchable)
   {
-    for (size_t i = 0; i + 1 < executors_.size(); ++i) {
+    auto control = std::make_shared<rclcpp::Node>("localization_switch");
+    bool requested = false;
+    auto service = control->create_service<std_srvs::srv::Trigger>(
+      "/localization/start_mapping",
+      [&requested, switchable](const std_srvs::srv::Trigger::Request::SharedPtr,
+      std_srvs::srv::Trigger::Response::SharedPtr response) {
+        requested = switchable;
+        response->success = true;
+        response->message = switchable ? "Localization handoff requested" : "Already mapping";
+      });
+    for (size_t i = 0; i < executors_.size(); ++i) {
       threads_.emplace_back([executor = executors_[i]] {executor->spin();});
     }
-    executors_.back()->spin();
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(control);
+    while (rclcpp::ok() && !requested) {
+      executor.spin_once(std::chrono::milliseconds(100));
+    }
+    if (requested) {rclcpp::shutdown();}
+    return requested;
   }
 
 private:
@@ -126,22 +144,27 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  Backend backend;
   int result = 0;
   try {
+    Backend backend;
     const auto args = rclcpp::remove_ros_arguments(argc, argv);
-    if (args.size() != 2 || (args[1] != "amcl" && args[1] != "slam")) {
-      throw std::invalid_argument("Expected backend argument: amcl or slam");
+    if (args.size() != 2 || (args[1] != "amcl" && args[1] != "slam" &&
+      args[1] != "mapping" && args[1] != "none"))
+    {
+      throw std::invalid_argument("Expected backend argument: amcl, slam, mapping or none");
     }
     if (args[1] == "amcl") {
       backend.add<nav2_map_server::MapServer>("map_server");
       backend.add<TrackedMountAmcl>("amcl");
-    } else {
+    } else if (args[1] != "none") {
       backend.add<slam_toolbox::AsynchronousSlamToolbox>("slam_toolbox");
     }
-    backend.add<nav2_lifecycle_manager::LifecycleManager>(
-      args[1] == "amcl" ? "lifecycle_manager_localization" : "lifecycle_manager_slam");
-    backend.spin();
+    if (args[1] != "none") {
+      backend.add<nav2_lifecycle_manager::LifecycleManager>(
+        args[1] == "amcl" ? "lifecycle_manager_localization" : "lifecycle_manager_slam");
+    }
+    // Exit only after all old components are destroyed; launch owns the next backend.
+    result = backend.spin(args[1] != "mapping") ? 42 : 0;
   } catch (const std::exception & error) {
     RCLCPP_FATAL(rclcpp::get_logger("localization_backend"), "%s", error.what());
     result = 1;
