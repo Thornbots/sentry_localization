@@ -15,6 +15,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME} "srv/SaveMap.srv"
   DEPENDENCIES builtin_interfaces)
 find_package(geometry_msgs REQUIRED)
+find_package(dji_serial_bridge REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
@@ -40,7 +41,8 @@ ament_target_dependencies(localization_backend
   sensor_msgs tf2 tf2_ros)
 # slam_toolbox exports its backend libraries separately from its rosidl targets.
 target_link_libraries(localization_backend ${slam_toolbox_LIBRARIES} Boost::serialization TBB::tbb)
-ament_target_dependencies(passthrough_odom_publisher nav_msgs rclcpp)
+target_include_directories(passthrough_odom_publisher PRIVATE include)
+ament_target_dependencies(passthrough_odom_publisher dji_serial_bridge nav_msgs rclcpp)
 add_executable(ekf_input_publisher src/ekf_input_publisher.cpp)
 target_include_directories(ekf_input_publisher PRIVATE include)
 ament_target_dependencies(ekf_input_publisher nav_msgs rclcpp)

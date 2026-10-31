@@ -105,64 +105,75 @@ def test_wait_skips_bad_messages_then_seeds_and_cleans_up(monkeypatch):
 
 
 @pytest.mark.parametrize('blue', [False, True])
-@pytest.mark.parametrize('reanchor_first', [False, True])
-def test_team_gate_waits_for_assignment_then_new_matching_odom(monkeypatch, blue, reanchor_first):
+def test_team_gate_adds_start_to_raw_displacement_after_assignment(monkeypatch, blue):
     start = 4.625 if blue else -4.625
-    assigned_ns = 10_100_000_000
     messages = [
-        odom(x=-start),
-        ('/dji_serial_bridge/ref_sys', NS(robot_id=0, is_on_blue_team=blue), assigned_ns),
-        ('/odom', odom(nanos=100_000_000, x=-start), assigned_ns),
+        odom(x=0),
+        ('/dji_serial_bridge/ref_sys', NS(robot_id=0, is_on_blue_team=not blue), 10_000_000_000),
+        odom(x=0),
+        ('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=blue), 10_100_000_000),
+        ('/odom', odom(x=0), 10_100_000_000),  # Captured before assignment.
+        ('/odom', odom(nanos=200_000_000, x=start), 10_200_000_000),
+        ('/odom', odom(nanos=200_000_000, x=0, y=0.301), 10_200_000_000),
+        ('/odom', odom(nanos=200_000_000, x=0.2, y=-0.1), 10_200_000_000),
     ]
-    if reanchor_first:
-        messages.append(('/odom', odom(nanos=100_000_000, x=start), assigned_ns))
-    messages.extend([
-        ('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=blue), assigned_ns),
-        ('/odom', odom(x=start), assigned_ns),  # Captured before assignment, delivered after it.
-        ('/odom', odom(nanos=100_000_000, x=start), assigned_ns),
-        ('/odom', odom(nanos=200_000_000, x=-start), 10_200_000_000),
-        ('/odom', odom(nanos=200_000_000, x=start, y=0.301), 10_200_000_000),
-        ('/odom', odom(nanos=200_000_000, x=start + 0.2, y=0.2), 10_200_000_000),
-    ])
     node = fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, require_team=True)[:2] == [start + 0.2, 0.2]
+    assert gate.wait_for_seed(False, require_team=True) == [start + 0.2, -0.1] + [0.0] * 13
     assert messages == []
     assert node.destroyed_subscriptions == ['/dji_serial_bridge/ref_sys', '/odom']
     assert node.destroyed
 
 
-def test_team_change_requires_new_odom_from_new_start(monkeypatch):
+@pytest.mark.parametrize('backend', ['amcl', 'slam'])
+@pytest.mark.parametrize('blue', [False, True])
+def test_backend_exec_waits_for_first_valid_team_then_sets_only_team_prior(
+        monkeypatch, backend, blue):
     messages = [
-        ('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=False), 10_000_000_000),
-        ('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=True), 10_100_000_000),
-        ('/odom', odom(nanos=150_000_000, x=-4.625), 10_150_000_000),
-        ('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=True), 10_200_000_000),
-        ('/odom', odom(nanos=150_000_000, x=4.625), 10_200_000_000),
+        odom(x=0),
+        ('/dji_serial_bridge/ref_sys', NS(robot_id=0, is_on_blue_team=not blue), 10_000_000_000),
+        ('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=blue), 10_000_000_000),
     ]
-    fake_ros(monkeypatch, messages)
+    node = fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, require_team=True)[:2] == [4.625, 0.002]
-    assert messages == []
+    executed = []
+
+    def execute(path, command):
+        assert messages == []  # AMCL cannot exist before valid REF_SYS is consumed.
+        assert node.destroyed
+        executed.append((path, command))
+
+    monkeypatch.setattr(gate.os, 'execvp', execute)
+    forwarded = ['--ros-args', '--params-file', '/tmp/backend.yaml']
+    assert gate.main(['--seed-use-sim-time', 'false', '--backend', backend, *forwarded]) == 0
+    path, command = executed[0]
+    assert path == '/overlay/sentry_localization/lib/sentry_localization/localization_backend'
+    assert command[1:5] == [backend, *forwarded]
+    start = 4.625 if blue else -4.625
+    if backend == 'amcl':
+        assert command[5:] == ['-p', 'set_initial_pose:=true', '-p', f'initial_pose.x:={start}',
+                               '-p', 'initial_pose.y:=0.0', '-p', 'initial_pose.yaw:=0.0']
+    else:
+        assert command[5:] == ['-p', 'map_start_pose:=' + json.dumps([start, 0.0, 0.0])]
 
 
-@pytest.mark.parametrize('messages', [
-    [odom(x=-4.625)],
-    [('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=True), 10_000_000_000)],
-    [('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=True), 10_000_000_000),
-     odom(x=-4.625)],
-])
-def test_team_or_matching_odom_timeout_never_execs(monkeypatch, messages, capsys):
-    node = fake_ros(monkeypatch, list(messages))
-    wall_times = iter([0.0] * (len(messages) + 1) + [15.0])
+@pytest.mark.parametrize('backend', [None, 'amcl', 'slam'])
+def test_no_referee_never_execs_even_after_old_timeout(monkeypatch, backend, capsys):
+    messages = [odom(x=0),
+                ('/dji_serial_bridge/ref_sys', NS(robot_id=0, is_on_blue_team=True), 10_000_000_000)]
+    node = fake_ros(monkeypatch, messages)
+    monkeypatch.setattr(sys.modules['rclpy'], 'ok', lambda: bool(messages))
+    wall_times = iter([0.0, 30.0, 30.0, 60.0, 60.0])
     monkeypatch.setattr(gate.time, 'monotonic', lambda: next(wall_times))
     executed = []
     monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
-    assert gate.main(['--seed-use-sim-time', 'false', '--require-team']) == 1
+    args = ['--seed-use-sim-time', 'false', '--require-team']
+    if backend:
+        args += ['--backend', backend]
+    assert gate.main(args) == 1
     assert executed == []
-    assert 'referee team and subsequent fresh raw /odom' in capsys.readouterr().err
-    assert node.errors and node.destroyed
-    assert node.destroyed_subscriptions == ['/dji_serial_bridge/ref_sys', '/odom']
+    assert node.destroyed
+    assert 'ROS shut down' in capsys.readouterr().err
 
 
 def test_wall_timeout_with_stopped_ros_clock_never_starts_ekf(monkeypatch, capsys):
@@ -178,11 +189,11 @@ def test_wall_timeout_with_stopped_ros_clock_never_starts_ekf(monkeypatch, capsy
     assert 'EKF was not started' in node.errors[0]
 
 
-def test_explicit_practice_team_rechecks_seed_after_restart(monkeypatch):
-    messages = [odom(x=-4.625), odom(x=0), odom(x=4.625)]
+def test_explicit_practice_team_adds_start_to_raw_seed(monkeypatch):
+    messages = [odom(x=0.25)]
     fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, explicit_team='blue')[:2] == [4.625, 0.002]
+    assert gate.wait_for_seed(False, explicit_team='blue')[:2] == [4.875, 0.002]
     assert messages == []
 
 
@@ -249,62 +260,74 @@ def load_launch(monkeypatch, path):
     return actions, Opaque
 
 
-@pytest.mark.parametrize('seeded', [False, True])
 @pytest.mark.parametrize('require_team', [False, True])
-def test_launch_selects_gate_without_evaluating_arbitrary_initial_xy(
-        monkeypatch, seeded, require_team):
+def test_launch_gates_amcl_independently_of_room_navigation(monkeypatch, require_team):
     actions, opaque = load_launch(
         monkeypatch, Path(__file__).parents[1] / 'launch/localization.launch.py')
-    declaration = next(action for action in actions if action.args == ('seed_from_raw_odom',))
-    assert declaration.kwargs['default_value'] == 'false'
     factory = next(action.kwargs['function'] for action in actions if isinstance(action, opaque))
-    team_declaration = next(action for action in actions if action.args == ('seed_require_team',))
-    assert team_declaration.kwargs['default_value'] == 'false'
-    config = {'seed_from_raw_odom': str(seeded).lower(),
-              'seed_require_team': str(require_team).lower()}
-    if not seeded:
-        config.update(initial_x='1.25', initial_y='-2.5')
-    shutdown, node = factory(NS(launch_configurations=config))
+    shutdown, node = factory(NS(launch_configurations={
+        'seed_from_raw_odom': 'false', 'seed_require_team': str(require_team).lower(),
+        'initial_x': 'invalid', 'initial_y': 'invalid', 'seed_explicit_team': 'blue'}))
     handler, = shutdown.args
     assert handler.kwargs['target_action'] is node
-    event = handler.kwargs['on_exit'][0].kwargs['event']
-    assert event.kwargs['reason'] == 'EKF process exited'
-    assert node.kwargs['executable'] == ('seeded_ekf' if seeded else 'ekf_node')
-    assert node.kwargs['parameters'][0] == '/share/sentry_localization/config/ekf.yaml'
-    params = node.kwargs['parameters'][1]
-    if seeded:
-        assert 'initial_state' not in params
-        assert node.kwargs['arguments'][0] == '--seed-use-sim-time'
-        assert ('--require-team' in node.kwargs['arguments']) == require_team
-    else:
-        assert params['initial_state'] == [1.25, -2.5] + [0.0] * 13
-    assert node.kwargs['remappings'] == [('odometry/filtered', '/localization/odom')]
+    assert node.kwargs['executable'] == 'seeded_ekf'
+    assert ('--require-team' in node.kwargs['arguments']) == require_team
+    if not require_team:
+        assert node.kwargs['arguments'][-2:] == ['--team', 'blue']
+    assert 'initial_state' not in node.kwargs['parameters'][1]
+    amcl = next(a for a in actions if a.kwargs.get('name') == 'localization_container')
+    assert amcl.kwargs['executable'] == 'seeded_ekf'
+    assert amcl.kwargs['arguments'][-2:] == ['--backend', 'amcl']
+    assert not any(key.startswith('initial_pose') for key in amcl.kwargs['parameters'][1])
+    scan = next(a for a in actions if a.kwargs.get('name') == 'scan_navigation_publisher')
+    assert scan.kwargs['remappings'] == [('/odom', '/scan_odom'),
+                                        ('/localization/odom', '/localization/scan_odom')]
 
 
-def test_auto_forwards_seed_and_map_save_directory(monkeypatch):
-    path = Path(__file__).parents[2] / 'thornbots_pkg/launch/auto.launch.py'
-    if not path.is_file():
-        pytest.skip('Workspace auto-launch forwarding check requires sibling thornbots_pkg')
-    actions, _ = load_launch(monkeypatch, path)
-    includes = [action for action in actions if 'launch_arguments' in action.kwargs]
-    assert len(includes) == 1
-    arguments = dict(includes[0].kwargs['launch_arguments'])
-    for name in ('seed_from_raw_odom', 'seed_require_team', 'seed_explicit_team', 'map_save_dir'):
-        assert arguments[name].args == (name,)
-    declaration = next(action for action in actions if action.args == ('seed_from_raw_odom',))
-    assert declaration.kwargs['default_value'] == 'false'
+def test_launch_only_saved_localization_gets_team_map_prior_mapping_keeps_zero(monkeypatch):
+    actions, _ = load_launch(
+        monkeypatch, Path(__file__).parents[1] / 'launch/localization.launch.py')
+    slam = [a for a in actions if a.kwargs.get('name') == 'slam_container']
+    assert len(slam) == 3
+    localization, loaded_mapping, blank_mapping = slam
+    assert localization.kwargs['executable'] == 'seeded_ekf'
+    assert localization.kwargs['arguments'][-2:] == ['--backend', 'slam']
+    for mapping in (loaded_mapping, blank_mapping):
+        assert mapping.kwargs['executable'] == 'localization_backend'
+        assert mapping.kwargs['arguments'] == ['slam']
+    assert loaded_mapping.kwargs['parameters'][1]['map_start_pose'] == [0.0, 0.0, 0.0]
+    assert 'map_start_pose' not in blank_mapping.kwargs['parameters'][1]
+    assert blank_mapping.kwargs['parameters'][1]['zero_origin_mapping'] is True
+    assert loaded_mapping.kwargs['parameters'][1]['zero_origin_mapping'] is False
 
 
-def test_raw_bootstrap_excludes_command_nodes(monkeypatch):
-    path = Path(__file__).parents[2] / 'thornbots_pkg/launch/auto.launch.py'
-    if not path.is_file():
-        pytest.skip('Workspace bootstrap check requires sibling thornbots_pkg')
-    actions, _ = load_launch(monkeypatch, path)
-    group = next(a for a in actions if 'actions' in a.kwargs)
-    guarded = group.kwargs['actions']
-    names = {a.kwargs.get('name') for a in guarded}
-    assert {'mcb_relay', 'point_to_cv_target', 'target_selector', 'target_tracker'} <= names
-    outside = [a.kwargs.get('name') for a in actions if a not in guarded]
-    assert {name for name in outside if name} == {'dji_serial_bridge', 'pose_translator'}
-    declaration = next(action for action in actions if action.args == ('seed_require_team',))
-    assert declaration.kwargs['default_value'] == 'false'
+def test_room_navigation_without_explicit_team_retains_raw_zero_origin(monkeypatch):
+    messages = [odom(x=0.15, y=-0.1)]
+    fake_ros(monkeypatch, messages)
+    monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
+    assert gate.wait_for_seed(False, require_team=False) == [0.15, -0.1] + [0.0] * 13
+
+
+def test_required_referee_ignores_conflicting_explicit_practice_team(monkeypatch):
+    messages = [
+        odom(x=0),
+        ('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=False), 10_000_000_000),
+        ('/odom', odom(nanos=100_000_000, x=0), 10_100_000_000),
+    ]
+    fake_ros(monkeypatch, messages)
+    monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
+    assert gate.wait_for_seed(False, require_team=True, explicit_team='blue')[0] == -4.625
+
+
+def test_valid_referee_without_fresh_raw_seed_times_out_without_ekf(monkeypatch, capsys):
+    messages = [('/dji_serial_bridge/ref_sys', NS(robot_id=7, is_on_blue_team=True),
+                 10_000_000_000), odom(seconds=1)]
+    node = fake_ros(monkeypatch, messages)
+    wall_times = iter([0.0, 0.0, 0.0, 0.0, 15.0])
+    monkeypatch.setattr(gate.time, 'monotonic', lambda: next(wall_times))
+    executed = []
+    monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
+    assert gate.main(['--seed-use-sim-time', 'false', '--require-team']) == 1
+    assert executed == []
+    assert node.destroyed
+    assert 'within 15 s' in capsys.readouterr().err

@@ -4,7 +4,7 @@
 ### Estimates the navigation pose in nav_odom; thornbots owns correction TF.
 ###   odom0 (/localization/ekf_input): vx, vy and fixed yaw. root is heading-fixed,
 ###     so orientation is always identity.
-###   odom1 (/scan_odom, rf2o_laser_odometry): x, y only, fused continuously.
+###   odom1 (/localization/scan_odom, team-offset rf2o): x, y only, fused continuously.
 ### See README.md Notes for source rationale and why the adapter's fixed
 ### identity yaw is fused.
 ekf_filter_node:
@@ -49,7 +49,7 @@ ekf_filter_node:
     odom0_differential: false
     odom0_relative: false
 
-    odom1: /scan_odom
+    odom1: /localization/scan_odom
     # rf2o's x/y covariance changes per scan with its match grade
     # (config/rf2o.yaml): a weight against odom0's velocity, not the
     # absolute pose's true uncertainty. Leave odom1_pose_rejection_threshold

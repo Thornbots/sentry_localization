@@ -7,7 +7,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
-"""Launch-time gate: exec EKF only after a fresh raw odometry seed exists."""
+"""Gate navigation and localization processes on referee team assignment."""
 
 import argparse
 import json
@@ -33,7 +33,7 @@ def initial_state(message, now_ns):
     return [float(position.x), float(position.y)] + [0.0] * 13
 
 
-def wait_for_seed(use_sim_time, require_team=False, explicit_team=None):
+def wait_for_seed(use_sim_time, require_team=False, explicit_team=None, team_only=False):
     """Wait on ROS time freshness with a monotonic wall-time deadline."""
     import rclpy
     from nav_msgs.msg import Odometry
@@ -44,15 +44,16 @@ def wait_for_seed(use_sim_time, require_team=False, explicit_team=None):
     node = rclpy.create_node('ekf_seed_waiter', parameter_overrides=[
         Parameter('use_sim_time', value=use_sim_time)])
     seed = None
-    team = None if explicit_team is None else explicit_team == 'blue'
+    team = None if require_team or explicit_team is None else explicit_team == 'blue'
     team_since_ns = None
 
     def receive_team(message):
-        nonlocal team, team_since_ns
-        observed = bool(message.is_on_blue_team) if message.robot_id else None
-        if observed != team:
-            team = observed
+        nonlocal team, team_since_ns, seed
+        if team is None and message.robot_id:
+            team = bool(message.is_on_blue_team)
             team_since_ns = node.get_clock().now().nanoseconds
+            if team_only:
+                seed = [4.625 if team else -4.625, 0.0] + [0.0] * 13
 
     def receive(message):
         nonlocal seed
@@ -66,8 +67,9 @@ def wait_for_seed(use_sim_time, require_team=False, explicit_team=None):
                 if team is None or (require_team and stamp_ns <= team_since_ns):
                     return
                 start_x = 4.625 if team else -4.625
-                if math.hypot(candidate[0] - start_x, candidate[1]) > 0.3:
+                if math.hypot(candidate[0], candidate[1]) > 0.3:
                     return
+                candidate[0] += start_x
             seed = candidate
 
     # Volatile, best effort accepts both reliable and best-effort raw publishers.
@@ -78,11 +80,14 @@ def wait_for_seed(use_sim_time, require_team=False, explicit_team=None):
         team_subscription = node.create_subscription(
             RefSysStatus, '/dji_serial_bridge/ref_sys', receive_team, qos_profile_sensor_data)
     deadline = time.monotonic() + WAIT_SECONDS
-    requirement = ('referee team and subsequent fresh raw /odom at its start'
+    requirement = ('referee team' if team_only else
+                   'referee team and subsequent fresh raw /odom'
                    if require_team else 'fresh raw /odom')
-    node.get_logger().info(f'Waiting up to 15 s for {requirement} before starting EKF')
+    node.get_logger().info(f'Waiting for {requirement} before starting process')
     try:
         while rclpy.ok() and seed is None:
+            if require_team and team is None:
+                deadline = time.monotonic() + WAIT_SECONDS
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(f'No {requirement} within 15 s; EKF was not started')
@@ -107,17 +112,33 @@ def main(argv=None):
     parser.add_argument('--seed-use-sim-time', choices=['true', 'false'], required=True)
     parser.add_argument('--require-team', action='store_true')
     parser.add_argument('--team', choices=['red', 'blue'])
+    parser.add_argument('--backend', choices=['amcl', 'slam'])
     options, ros_arguments = parser.parse_known_args(argv)
     try:
         from ament_index_python.packages import get_package_prefix
 
-        seed = wait_for_seed(options.seed_use_sim_time == 'true', options.require_team, options.team)
-        executable = os.path.join(
-            get_package_prefix('robot_localization'), 'lib', 'robot_localization', 'ekf_node')
-        command = [executable, *ros_arguments]
+        if options.backend:
+            seed = wait_for_seed(options.seed_use_sim_time == 'true', require_team=True,
+                                 team_only=True)
+            executable = os.path.join(get_package_prefix('sentry_localization'),
+                                      'lib', 'sentry_localization', 'localization_backend')
+            command = [executable, options.backend, *ros_arguments]
+        else:
+            seed = wait_for_seed(options.seed_use_sim_time == 'true',
+                                 options.require_team, options.team)
+            executable = os.path.join(
+                get_package_prefix('robot_localization'), 'lib', 'robot_localization', 'ekf_node')
+            command = [executable, *ros_arguments]
         if '--ros-args' not in ros_arguments:
             command.append('--ros-args')
-        command.extend(['-p', 'initial_state:=' + json.dumps(seed)])
+        if options.backend == 'amcl':
+            for key, value in {'set_initial_pose': 'true', 'initial_pose.x': seed[0],
+                               'initial_pose.y': 0.0, 'initial_pose.yaw': 0.0}.items():
+                command.extend(['-p', f'{key}:={value}'])
+        elif options.backend == 'slam':
+            command.extend(['-p', 'map_start_pose:=' + json.dumps([seed[0], 0.0, 0.0])])
+        else:
+            command.extend(['-p', 'initial_state:=' + json.dumps(seed)])
         os.execvp(command[0], command)
     except (TimeoutError, RuntimeError, OSError) as error:
         print(f'seeded_ekf: {error}', file=sys.stderr)
