@@ -26,11 +26,13 @@ class PassthroughOdomPublisher : public rclcpp::Node
 {
 public:
   PassthroughOdomPublisher()
-  : Node("passthrough_odom_publisher")
-  {
-    offset_ = sentry_localization::NavigationOffset(
+  : Node("passthrough_odom_publisher"),
+    offset_(
+      {declare_parameter<double>("red_start_x"), declare_parameter<double>("red_start_y"),
+        declare_parameter<double>("blue_start_x"), declare_parameter<double>("blue_start_y")},
       declare_parameter("require_team", true),
-      declare_parameter("explicit_team", std::string("")));
+      declare_parameter("explicit_team", std::string("")))
+  {
     navigation_frame_ = declare_parameter("navigation_frame", std::string("nav_odom"));
     pub_ = create_publisher<nav_msgs::msg::Odometry>("/localization/odom", 10);
     team_sub_ = create_subscription<dji_serial_bridge::msg::RefSysStatus>(

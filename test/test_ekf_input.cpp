@@ -54,7 +54,7 @@ TEST(EkfInput, HeadingIsDefinedInNavigationAxesWithoutAnOutputTfDependency)
 TEST(NavigationOffset, WaitsForValidTeamThenOffsetsBothRawAndScanPositions)
 {
   for (const bool blue : {false, true}) {
-    sentry_localization::NavigationOffset offset;
+    sentry_localization::NavigationOffset offset({-2.7, 0.6, 4.1, -1.2});
     nav_msgs::msg::Odometry raw;
     raw.header.stamp.sec = 12;
     raw.child_frame_id = "root";
@@ -67,14 +67,14 @@ TEST(NavigationOffset, WaitsForValidTeamThenOffsetsBothRawAndScanPositions)
     offset.observe(7, blue);
     auto navigation = offset.apply(raw, "nav_odom");
     ASSERT_TRUE(navigation);
-    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.x, blue ? 3.53 : -3.53);
-    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.y, -0.426);
+    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.x, blue ? 4.1 : -2.7);
+    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.y, (blue ? -1.2 : 0.6));
     raw.pose.pose.position.x = 0.25;
     raw.pose.pose.position.y = -0.15;
     offset.observe(7, !blue);  // This run keeps its first assignment.
     navigation = offset.apply(raw, "nav_odom");
-    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.x, (blue ? 3.53 : -3.53) + 0.25);
-    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.y, -0.426 - 0.15);
+    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.x, (blue ? 4.1 : -2.7) + 0.25);
+    EXPECT_DOUBLE_EQ(navigation->pose.pose.position.y, (blue ? -1.2 : 0.6) - 0.15);
     EXPECT_EQ(navigation->header.stamp, raw.header.stamp);
     EXPECT_EQ(navigation->header.frame_id, "nav_odom");
     EXPECT_EQ(navigation->child_frame_id, raw.child_frame_id);
@@ -87,7 +87,7 @@ TEST(NavigationOffset, WaitsForValidTeamThenOffsetsBothRawAndScanPositions)
 
 TEST(NavigationOffset, RejectsNonzeroBootButAllowsTravelAfterZeroBoot)
 {
-  sentry_localization::NavigationOffset offset;
+  sentry_localization::NavigationOffset offset({-2.7, 0.6, 4.1, -1.2});
   offset.observe(7, true);
   nav_msgs::msg::Odometry raw;
   raw.pose.pose.position.x = 3.53;
@@ -95,12 +95,12 @@ TEST(NavigationOffset, RejectsNonzeroBootButAllowsTravelAfterZeroBoot)
   raw.pose.pose.position.x = 0.0;
   ASSERT_TRUE(offset.apply(raw, "nav_odom"));
   raw.pose.pose.position.x = 2.0;
-  EXPECT_DOUBLE_EQ(offset.apply(raw, "nav_odom")->pose.pose.position.x, 5.53);
+  EXPECT_DOUBLE_EQ(offset.apply(raw, "nav_odom")->pose.pose.position.x, 6.1);
 }
 
 TEST(NavigationOffset, RoomWorkflowKeepsZeroOffsetWithoutReferee)
 {
-  sentry_localization::NavigationOffset offset(false);
+  sentry_localization::NavigationOffset offset({-2.7, 0.6, 4.1, -1.2}, false);
   nav_msgs::msg::Odometry raw;
   raw.pose.pose.position.x = 0.6;
   auto navigation = offset.apply(raw, "nav_odom");
