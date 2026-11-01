@@ -76,9 +76,9 @@ def load_stl(path):
 def load_world_triangles(world):
     """Load the same field collisions and parent transforms as combat::load_field."""
     world = Path(world).resolve()
-    model = ET.parse(world).find("./world/model[@name='ARCC_Field_2026']")
+    model = ET.parse(world).find('./world/model')  # the field is the world's first model
     if model is None:
-        raise ValueError('missing ARCC_Field_2026 model')
+        raise ValueError('world has no field model')
     result = []
     for link in model.findall('link'):
         for collision in link.findall('collision'):
@@ -144,14 +144,14 @@ def slice_cells(tris, z, res, origin, shape):
     return grid
 
 
-def rasterize(tris, z, res, origin, shape, grow=1):
+def rasterize(tris, z, res, origin, shape, grow=1, seed=(0.0, 0.0)):
     """Keep interior-facing surfaces; unobserved enclosed/exterior cells stay unknown."""
-    if res <= 0 or grow < 0 or not np.isfinite([z, res, *origin]).all():
+    if res <= 0 or grow < 0 or not np.isfinite([z, res, *origin, *seed]).all():
         raise ValueError('invalid raster parameters')
     geom = slice_cells(tris, z, res, origin, shape)
-    row, col = np.floor(-np.asarray(origin) / res).astype(int)[::-1]
+    row, col = np.floor((np.asarray(seed) - origin) / res).astype(int)[::-1]
     if not (0 <= row < shape[0] and 0 <= col < shape[1]) or geom[row, col]:
-        raise ValueError('world origin must be a free seed inside the canvas')
+        raise ValueError('seed must be a free cell inside the canvas')
     labels, _ = ndimage.label(~geom)
     interior = labels == labels[row, col]
     if interior[0].any() or interior[-1].any() or interior[:, 0].any() or interior[:, -1].any():
@@ -167,17 +167,19 @@ def rasterize(tris, z, res, origin, shape, grow=1):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('yaml', type=Path, help='existing map metadata and image canvas')
-    parser.add_argument('world', type=Path, help='sim/world/ARCC_Field_2026.sdf')
+    parser.add_argument('world', type=Path, help='field SDF, e.g. sim/world/ARCC_S2_3v3.sdf')
     parser.add_argument('out_pgm', type=Path)
     parser.add_argument('--z', type=float, default=0.357296694)
     parser.add_argument('--grow', type=int, default=1)
+    parser.add_argument('--seed', type=float, nargs=2, default=(0.0, 0.0), metavar=('X', 'Y'),
+                        help='free field point that the interior flood fill starts from')
     args = parser.parse_args()
     meta = yaml.safe_load(args.yaml.read_text())
     validate_metadata(meta)
     with Image.open(args.yaml.parent / meta['image']) as canvas:
         width, height = canvas.size
     image = rasterize(load_world_triangles(args.world), args.z, meta['resolution'],
-                      meta['origin'][:2], (height, width), args.grow)
+                      meta['origin'][:2], (height, width), args.grow, args.seed)
     Image.fromarray(image).save(args.out_pgm)
     values, counts = np.unique(image, return_counts=True)
     print(f'{args.out_pgm}: {width}x{height}, z={args.z}, ' +

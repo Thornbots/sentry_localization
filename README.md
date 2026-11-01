@@ -547,9 +547,10 @@ validation; the sim's ground-truth-derived raw input establishes no wheel accura
 
 ## Saved map
 
-`clean_map` is the canonical CAD-derived occupancy image for the corrected
-2026-10-20 field export, not a SLAM map or serialized pose graph. Geometry
-and frame placement come from [sim's world](../sim/README.md#the-world-frame).
+`clean_map` is the canonical CAD-derived occupancy image for sim's default
+field, the ARCC Season 2 3v3 Battlefield (2026-11-01), not a SLAM map or
+serialized pose graph. Geometry and frame placement come from
+[sim's world](../sim/README.md#the-world-frame); the 2026 field's map is retired.
 Its 2 cm canvas, YAML origin and thresholds are unchanged. The field frame
 is REP-105, centred at (0, 0), with x toward blue's base. Pixels
 are 0 occupied, 254 free and 128 unknown, including unobserved exterior and
@@ -559,11 +560,13 @@ strict margin: 128 corresponds to occupancy 127/255, between this map's
 free and occupied thresholds. YAML metadata stays unchanged.
 
 `tools/field_map.py` continues the CAD-slice workflow from the held map draft,
-reading collision poses/scales from the SDF instead of duplicating placement.
+reading collision poses/scales of the world's first model from the SDF instead
+of duplicating placement.
 It slices at nominal sim lidar z = 0.357296694 m (the 2026-10-26 CAD's
 0.368796694 m root-relative FOV reference minus the simulation's estimated
 0.0115 m suspension sag), flood fills the field
-interior from (0, 0), keeps surfaces bordering that interior,
+interior from `--seed` (default (0, 0); this field uses (0, -2.5) because the
+origin is inside the Central Wall base), keeps surfaces bordering that interior,
 and grows occupied cells by one cell to cover raster discretization.
 Plane intersections use a 1e-7 m tolerance to classify on-plane vertices and
 deduplicate endpoints; noncoplanar intersections use the farthest distinct
@@ -581,7 +584,7 @@ No extra runtime dependency is needed to load the shipped PGM assets.
 With those dependencies available, regenerate from this package:
 
 ```bash
-python3 tools/field_map.py map/clean_map.yaml ../sim/world/ARCC_Field_2026.sdf map/clean_map.pgm --z 0.357296694 --grow 1
+python3 tools/field_map.py map/clean_map.yaml ../sim/world/ARCC_S2_3v3.sdf map/clean_map.pgm --z 0.357296694 --grow 1 --seed 0 -2.5
 python3 -m pytest test/test_field_map.py
 ```
 
@@ -592,16 +595,24 @@ Optional actual-field bounds and image reproduction use an explicitly
 supplied corrected-world fixture (including its package-relative meshes):
 
 ```bash
-FIELD_MAP_WORLD=/path/to/sim/world/ARCC_Field_2026.sdf python3 -m pytest test/test_field_map_fixture.py
+FIELD_MAP_WORLD=/path/to/sim/world/ARCC_S2_3v3.sdf python3 -m pytest test/test_field_map_fixture.py
 ```
 
 To register that additional test during a colcon build, pass
-`--cmake-args -DSENTRY_FIELD_MAP_WORLD=/path/to/sim/world/ARCC_Field_2026.sdf`.
+`--cmake-args -DSENTRY_FIELD_MAP_WORLD=/path/to/sim/world/ARCC_S2_3v3.sdf`.
 Without that option only the standalone suite is registered; direct pytest
 collection reports the actual-field tests skipped when no fixture is given.
 An explicitly provided missing or incompatible fixture fails the test/build.
 
-The restored bar at y approximately +3 m now intersects the lidar slice.
-This static CAD map has no measured runtime localization accuracy. It still
-needs AMCL/scan agreement validation on the corrected world; prior-export
-localization measurements do not validate it.
+At the slice height the map holds the perimeter and Side Walls (0.5/0.422 m),
+the Central Wall base (0.422 m, its 0.17 m core enclosed and unknown), the
+Central Limbo Bar's post, the Side High Grounds' 0.41 m upper tiers (outlines,
+interiors unknown) and the Side Limbo Bars' two spacers each. It omits the
+0.21 m Central High Ground and lower tiers, both limbo bars themselves (Side
+lower bar 0.300-0.338 m, 2 cm under the slice; upper bars 0.41 m and above),
+the Central Wall panel (above 0.422 m), Scoring Areas, Pipe Chutes, Bumpy Road
+and the movable objectives. The sim lidar also sees the visual-only zig-zag
+pole, which the map lacks. A tilted chassis can put the Side lower bar or the
+0.41 m tier tops into real scans; this map does not model that. The
+[sim AMCL suite](../sim/README.md#localization-drift-suite) is the runtime check
+on this map; hardware needs the physical field.
