@@ -455,9 +455,14 @@ correction and slam_toolbox's correction stack on the same lidar data.
 ### Initial field position
 
 Raw `/odom` boots at `(0, 0)` for both teams, with field-aligned axes and
-heading-fixed `root` (identity yaw). Navigation adds the team start:
-red `(-3.53, -0.426)`, blue `(+3.53, -0.426)` (y is not mirrored; these are
-temporary, unmeasured spooky scrim values, the ARCC start was `(±4.625, 0)`).
+heading-fixed `root` (identity yaw). Navigation adds the independent per-team
+field start supplied by `thornbots_pkg/auto.launch.py`: `red_start_x`,
+`red_start_y`, `blue_start_x`, `blue_start_y`, in metres from field centre.
+That launch owns the only defaults; configure surveyed per-robot values in
+`/etc/thornbots/launch.env` through `AUTO_LAUNCH_ARGS`
+([configuration](../thornbots_pkg/README.md#point_to_cv_target)). No team-pair
+mirroring is assumed. Firmware contains no start position: the Jetson sets
+MCB navigation through RELOCALIZE after receiving the referee team.
 Both chassis boot headings are π/2 (+y); chassis heading remains separate from root yaw.
 Team changes translation, never mirrors axes or rotates heading.
 

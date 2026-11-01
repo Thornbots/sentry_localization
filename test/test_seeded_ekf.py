@@ -25,6 +25,11 @@ gate = importlib.util.module_from_spec(spec)
 loader.exec_module(gate)
 
 
+STARTS = ((-2.7, 0.6), (4.1, -1.2))
+START_ARGS = ['--red-start-x', '-2.7', '--red-start-y', '0.6',
+              '--blue-start-x', '4.1', '--blue-start-y', '-1.2']
+
+
 @pytest.fixture(autouse=True)
 def fake_ament(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ament_index_python', NS())
@@ -98,7 +103,7 @@ def test_wait_skips_bad_messages_then_seeds_and_cleans_up(monkeypatch):
     messages = [odom(seconds=0), odom(seconds=1), odom(x=float('nan')), odom()]
     node = fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 100.0)
-    assert gate.wait_for_seed(True)[:2] == [-4.067, 0.002]
+    assert gate.wait_for_seed(True, starts=STARTS)[:2] == [-4.067, 0.002]
     assert messages == []
     assert node.sim_time is True
     assert node.destroyed and node.destroyed_subscriptions == ['/odom']
@@ -106,7 +111,7 @@ def test_wait_skips_bad_messages_then_seeds_and_cleans_up(monkeypatch):
 
 @pytest.mark.parametrize('blue', [False, True])
 def test_team_gate_adds_start_to_raw_displacement_after_assignment(monkeypatch, blue):
-    start = 3.53 if blue else -3.53
+    start, start_y = STARTS[blue]
     messages = [
         odom(x=0),
         ('/dji_serial_bridge/ref_sys', NS(robot_id=0, is_on_blue_team=not blue), 10_000_000_000),
@@ -119,7 +124,7 @@ def test_team_gate_adds_start_to_raw_displacement_after_assignment(monkeypatch, 
     ]
     node = fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, require_team=True) == [start + 0.2, -0.426 - 0.1] + [0.0] * 13
+    assert gate.wait_for_seed(False, starts=STARTS, require_team=True) == [start + 0.2, start_y - 0.1] + [0.0] * 13
     assert messages == []
     assert node.destroyed_subscriptions == ['/dji_serial_bridge/ref_sys', '/odom']
     assert node.destroyed
@@ -145,16 +150,16 @@ def test_backend_exec_waits_for_first_valid_team_then_sets_only_team_prior(
 
     monkeypatch.setattr(gate.os, 'execvp', execute)
     forwarded = ['--ros-args', '--params-file', '/tmp/backend.yaml']
-    assert gate.main(['--seed-use-sim-time', 'false', '--backend', backend, *forwarded]) == 0
+    assert gate.main(START_ARGS + ['--seed-use-sim-time', 'false', '--backend', backend, *forwarded]) == 0
     path, command = executed[0]
     assert path == '/overlay/sentry_localization/lib/sentry_localization/localization_backend'
     assert command[1:5] == [backend, *forwarded]
-    start = 3.53 if blue else -3.53
+    start, start_y = STARTS[blue]
     if backend == 'amcl':
         assert command[5:] == ['-p', 'set_initial_pose:=true', '-p', f'initial_pose.x:={start}',
-                               '-p', 'initial_pose.y:=-0.426', '-p', 'initial_pose.yaw:=0.0']
+                               '-p', f'initial_pose.y:={start_y}', '-p', 'initial_pose.yaw:=0.0']
     else:
-        assert command[5:] == ['-p', 'map_start_pose:=' + json.dumps([start, -0.426, 0.0])]
+        assert command[5:] == ['-p', 'map_start_pose:=' + json.dumps([start, start_y, 0.0])]
 
 
 @pytest.mark.parametrize('backend', [None, 'amcl', 'slam'])
@@ -170,7 +175,7 @@ def test_no_referee_never_execs_even_after_old_timeout(monkeypatch, backend, cap
     args = ['--seed-use-sim-time', 'false', '--require-team']
     if backend:
         args += ['--backend', backend]
-    assert gate.main(args) == 1
+    assert gate.main(START_ARGS + args) == 1
     assert executed == []
     assert node.destroyed
     assert 'ROS shut down' in capsys.readouterr().err
@@ -182,7 +187,7 @@ def test_wall_timeout_with_stopped_ros_clock_never_starts_ekf(monkeypatch, capsy
     monkeypatch.setattr(gate.time, 'monotonic', lambda: next(wall_times))
     executed = []
     monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
-    assert gate.main(['--seed-use-sim-time', 'true']) == 1
+    assert gate.main(START_ARGS + ['--seed-use-sim-time', 'true']) == 1
     assert executed == []
     assert 'EKF was not started' in capsys.readouterr().err
     assert node.destroyed and node.destroyed_subscriptions == ['/odom']
@@ -193,7 +198,7 @@ def test_explicit_practice_team_adds_start_to_raw_seed(monkeypatch):
     messages = [odom(x=0.25)]
     fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, explicit_team='blue')[:2] == pytest.approx([3.78, -0.424])
+    assert gate.wait_for_seed(False, starts=STARTS, explicit_team='blue')[:2] == pytest.approx([4.35, -1.198])
     assert messages == []
 
 
@@ -201,7 +206,8 @@ def test_exec_preserves_launch_configuration_and_overrides_only_seed(monkeypatch
     seed = [-4.067, 0.002] + [0.0] * 13
     received = []
 
-    def wait(sim, require_team, explicit_team):
+    def wait(sim, require_team, explicit_team, *, starts):
+        assert starts == STARTS
         received.append((sim, require_team))
         return seed
 
@@ -211,7 +217,7 @@ def test_exec_preserves_launch_configuration_and_overrides_only_seed(monkeypatch
     forwarded = ['--ros-args', '--params-file', '/tmp/ekf.yaml',
                  '-r', '__node:=ekf_filter_node', '-r',
                  'odometry/filtered:=/localization/odom']
-    assert gate.main(['--seed-use-sim-time', 'false', '--require-team', *forwarded]) == 0
+    assert gate.main(START_ARGS + ['--seed-use-sim-time', 'false', '--require-team', *forwarded]) == 0
     assert received == [(False, True)]
     executable, command = executed[0]
     assert executable == '/overlay/robot_localization/lib/robot_localization/ekf_node'
@@ -305,7 +311,7 @@ def test_room_navigation_without_explicit_team_retains_raw_zero_origin(monkeypat
     messages = [odom(x=0.15, y=-0.1)]
     fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, require_team=False) == [0.15, -0.1] + [0.0] * 13
+    assert gate.wait_for_seed(False, starts=STARTS, require_team=False) == [0.15, -0.1] + [0.0] * 13
 
 
 def test_required_referee_ignores_conflicting_explicit_practice_team(monkeypatch):
@@ -316,7 +322,7 @@ def test_required_referee_ignores_conflicting_explicit_practice_team(monkeypatch
     ]
     fake_ros(monkeypatch, messages)
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
-    assert gate.wait_for_seed(False, require_team=True, explicit_team='blue')[0] == -3.53
+    assert gate.wait_for_seed(False, starts=STARTS, require_team=True, explicit_team='blue')[0] == -2.7
 
 
 def test_valid_referee_without_fresh_raw_seed_times_out_without_ekf(monkeypatch, capsys):
@@ -327,7 +333,7 @@ def test_valid_referee_without_fresh_raw_seed_times_out_without_ekf(monkeypatch,
     monkeypatch.setattr(gate.time, 'monotonic', lambda: next(wall_times))
     executed = []
     monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
-    assert gate.main(['--seed-use-sim-time', 'false', '--require-team']) == 1
+    assert gate.main(START_ARGS + ['--seed-use-sim-time', 'false', '--require-team']) == 1
     assert executed == []
     assert node.destroyed
     assert 'within 15 s' in capsys.readouterr().err

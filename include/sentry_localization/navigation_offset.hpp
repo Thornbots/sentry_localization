@@ -16,34 +16,43 @@
 
 #include <cmath>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include "nav_msgs/msg/odometry.hpp"
 
 namespace sentry_localization
 {
-// TEMPORARY spooky scrim start (unmeasured, not good); restore or measure before the next
-// event, see docs/ROADMAP.md. Matches firmware START_X/START_Y; y is not mirrored.
-constexpr double kStartX = 3.53;
-constexpr double kStartY = -0.426;
+struct TeamStarts
+{
+  double red_x, red_y, blue_x, blue_y;
+};
 
 // Latch the first valid referee team for this run; never guess from a zero ID.
 class NavigationOffset
 {
 public:
-  explicit NavigationOffset(bool require_team = true, const std::string & explicit_team = "")
-  : require_zero_start_(require_team || !explicit_team.empty())
+  explicit NavigationOffset(
+    TeamStarts starts, bool require_team = true, const std::string & explicit_team = "")
+  : starts_(starts), require_zero_start_(require_team || !explicit_team.empty())
   {
+    if (!std::isfinite(starts.red_x) || !std::isfinite(starts.red_y) ||
+      !std::isfinite(starts.blue_x) || !std::isfinite(starts.blue_y))
+    {
+      throw std::invalid_argument("Team starts must be finite field coordinates");
+    }
     if (!require_team) {
-      start_x_ = explicit_team.empty() ? 0.0 : (explicit_team == "blue" ? kStartX : -kStartX);
-      start_y_ = explicit_team.empty() ? 0.0 : kStartY;
+      start_x_ = explicit_team.empty() ? 0.0 :
+        (explicit_team == "blue" ? starts_.blue_x : starts_.red_x);
+      start_y_ = explicit_team.empty() ? 0.0 :
+        (explicit_team == "blue" ? starts_.blue_y : starts_.red_y);
     }
   }
 
   void observe(unsigned int robot_id, bool blue)
   {
     if (robot_id != 0 && !start_x_) {
-      start_x_ = blue ? kStartX : -kStartX;
-      start_y_ = kStartY;
+      start_x_ = blue ? starts_.blue_x : starts_.red_x;
+      start_y_ = blue ? starts_.blue_y : starts_.red_y;
     }
   }
 
@@ -68,6 +77,7 @@ public:
   }
 
 private:
+  TeamStarts starts_;
   bool require_zero_start_;
   bool started_{false};
   std::optional<double> start_x_;

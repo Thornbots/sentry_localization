@@ -17,10 +17,6 @@ import sys
 import time
 
 
-# TEMPORARY spooky scrim start (unmeasured, not good); restore or measure before the next event,
-# see docs/ROADMAP.md. Matches firmware START_X/START_Y; red is -START_X, y is not mirrored.
-START_X = 3.53
-START_Y = -0.426
 WAIT_SECONDS = 15.0
 MAX_AGE_SECONDS = 0.5
 
@@ -37,7 +33,7 @@ def initial_state(message, now_ns):
     return [float(position.x), float(position.y)] + [0.0] * 13
 
 
-def wait_for_seed(use_sim_time, require_team=False, explicit_team=None, team_only=False):
+def wait_for_seed(use_sim_time, require_team=False, explicit_team=None, team_only=False, *, starts):
     """Wait on ROS time freshness with a monotonic wall-time deadline."""
     import rclpy
     from nav_msgs.msg import Odometry
@@ -57,7 +53,7 @@ def wait_for_seed(use_sim_time, require_team=False, explicit_team=None, team_onl
             team = bool(message.is_on_blue_team)
             team_since_ns = node.get_clock().now().nanoseconds
             if team_only:
-                seed = [START_X if team else -START_X, START_Y] + [0.0] * 13
+                seed = list(starts[bool(team)]) + [0.0] * 13
 
     def receive(message):
         nonlocal seed
@@ -70,11 +66,11 @@ def wait_for_seed(use_sim_time, require_team=False, explicit_team=None, team_onl
                 stamp_ns = stamp.sec * 1_000_000_000 + stamp.nanosec
                 if team is None or (require_team and stamp_ns <= team_since_ns):
                     return
-                start_x = START_X if team else -START_X
+                start_x, start_y = starts[bool(team)]
                 if math.hypot(candidate[0], candidate[1]) > 0.3:
                     return
                 candidate[0] += start_x
-                candidate[1] += START_Y
+                candidate[1] += start_y
             seed = candidate
 
     # Volatile, best effort accepts both reliable and best-effort raw publishers.
@@ -118,19 +114,26 @@ def main(argv=None):
     parser.add_argument('--require-team', action='store_true')
     parser.add_argument('--team', choices=['red', 'blue'])
     parser.add_argument('--backend', choices=['amcl', 'slam'])
+    for team in ('red', 'blue'):
+        for axis in ('x', 'y'):
+            parser.add_argument(f'--{team}-start-{axis}', type=float, required=True)
     options, ros_arguments = parser.parse_known_args(argv)
+    starts = ((options.red_start_x, options.red_start_y),
+              (options.blue_start_x, options.blue_start_y))
+    if not all(math.isfinite(value) for pair in starts for value in pair):
+        parser.error('Team starts must be finite field coordinates')
     try:
         from ament_index_python.packages import get_package_prefix
 
         if options.backend:
             seed = wait_for_seed(options.seed_use_sim_time == 'true', require_team=True,
-                                 team_only=True)
+                                 team_only=True, starts=starts)
             executable = os.path.join(get_package_prefix('sentry_localization'),
                                       'lib', 'sentry_localization', 'localization_backend')
             command = [executable, options.backend, *ros_arguments]
         else:
             seed = wait_for_seed(options.seed_use_sim_time == 'true',
-                                 options.require_team, options.team)
+                                 options.require_team, options.team, starts=starts)
             executable = os.path.join(
                 get_package_prefix('robot_localization'), 'lib', 'robot_localization', 'ekf_node')
             command = [executable, *ros_arguments]

@@ -47,6 +47,11 @@ def generate_launch_description():
         'real_hardware-derived value.'
     )
     use_sim_time = LaunchConfiguration('use_sim_time')
+    start_names = ['red_start_x', 'red_start_y', 'blue_start_x', 'blue_start_y']
+    start_parameters = {name: ParameterValue(LaunchConfiguration(name), value_type=float)
+                        for name in start_names}
+    start_arguments = [item for name in start_names
+                       for item in ['--' + name.replace('_', '-'), LaunchConfiguration(name)]]
 
     odom_frame_arg = DeclareLaunchArgument(
         'odom_frame', default_value='nav_odom',
@@ -155,7 +160,7 @@ def generate_launch_description():
         name='passthrough_odom_publisher',
         output='screen',
         condition=IfCondition(passthrough_selected),
-        parameters=[{'use_sim_time': use_sim_time,
+        parameters=[{**start_parameters, 'use_sim_time': use_sim_time,
                      'navigation_frame': LaunchConfiguration('odom_frame'),
                      'require_team': ParameterValue(
                          LaunchConfiguration('seed_require_team'), value_type=bool),
@@ -171,7 +176,7 @@ def generate_launch_description():
     scan_navigation_node = Node(
         package='sentry_localization', executable='passthrough_odom_publisher',
         name='scan_navigation_publisher', output='screen', condition=IfCondition(ekf_selected),
-        parameters=[{'use_sim_time': use_sim_time,
+        parameters=[{**start_parameters, 'use_sim_time': use_sim_time,
                      'navigation_frame': LaunchConfiguration('odom_frame'),
                      'require_team': ParameterValue(
                          LaunchConfiguration('seed_require_team'), value_type=bool),
@@ -194,7 +199,7 @@ def generate_launch_description():
     )
 
     def make_ekf(context):
-        arguments = ['--seed-use-sim-time', use_sim_time]
+        arguments = [*start_arguments, '--seed-use-sim-time', use_sim_time]
         if context.launch_configurations['seed_require_team'].lower() == 'true':
             arguments.append('--require-team')
         elif context.launch_configurations.get('seed_explicit_team', ''):
@@ -287,7 +292,8 @@ def generate_launch_description():
     amcl_container = Node(
         package='sentry_localization', executable='seeded_ekf',
         name='localization_container',
-        arguments=['--seed-use-sim-time', use_sim_time, '--backend', 'amcl'], output='screen',
+        arguments=[*start_arguments, '--seed-use-sim-time', use_sim_time, '--backend', 'amcl'],
+        output='screen',
         condition=IfCondition(amcl_selected),
         parameters=[amcl_params_file, {
             'use_sim_time': use_sim_time,
@@ -321,7 +327,8 @@ def generate_launch_description():
             executable='localization_backend' if mapping else 'seeded_ekf',
             name='slam_container',
             arguments=['slam'] if mapping else [
-                '--seed-use-sim-time', use_sim_time, '--backend', 'slam'], output='screen',
+                *start_arguments, '--seed-use-sim-time', use_sim_time, '--backend', 'slam'],
+            output='screen',
             condition=IfCondition(condition), parameters=[slam_params_file, params])
 
     slam_with_map_container = slam_container(PythonExpression([
@@ -333,6 +340,8 @@ def generate_launch_description():
     slam_no_map_container = slam_container(slam_toolbox_no_map_selected, False, mapping=True)
 
     return LaunchDescription([
+        *[DeclareLaunchArgument(name, description='Field start metres; from auto.launch.py')
+          for name in start_names],
         DeclareLaunchArgument('seed_from_raw_odom', default_value='true',
                               description='Compatibility argument; navigation always seeds '
                               'from fresh raw /odom.'),
