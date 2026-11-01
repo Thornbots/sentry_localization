@@ -22,6 +22,10 @@ field_map = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(field_map)
 
 
+# Free floor south of the Central Wall; (0, 0) is inside its base (README "Saved map").
+SEED = (0.0, -2.5)
+
+
 @unittest.skipUnless(os.environ.get('FIELD_MAP_WORLD'), 'FIELD_MAP_WORLD fixture not supplied')
 class ActualFieldTest(unittest.TestCase):
     @classmethod
@@ -31,9 +35,9 @@ class ActualFieldTest(unittest.TestCase):
     def test_world_frame(self):
         low = self.triangles.min(axis=(0, 1))
         high = self.triangles.max(axis=(0, 1))
-        np.testing.assert_allclose(low, [-6.168884277, -4.168884277, -.025], atol=1e-6)
-        np.testing.assert_allclose(high, [6.168884277, 4.168884277, .498611624], atol=1e-6)
-        self.assertEqual(len(self.triangles), 8562)
+        np.testing.assert_allclose(low, [-6.37, -4.37, -.02], atol=1e-6)
+        np.testing.assert_allclose(high, [6.37, 4.37, 1.406], atol=1e-6)
+        self.assertEqual(len(self.triangles), 748)
 
     def test_saved_map_reproduces(self):
         meta = yaml.safe_load((ROOT / 'map/clean_map.yaml').read_text())
@@ -41,7 +45,7 @@ class ActualFieldTest(unittest.TestCase):
         with Image.open(ROOT / 'map' / meta['image']) as image:
             saved = np.asarray(image)
         generated = field_map.rasterize(self.triangles, .357296694, meta['resolution'],
-                                        meta['origin'][:2], saved.shape, grow=1)
+                                        meta['origin'][:2], saved.shape, grow=1, seed=SEED)
         np.testing.assert_array_equal(saved, generated)
 
 
