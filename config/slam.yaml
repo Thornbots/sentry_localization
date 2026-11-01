@@ -10,12 +10,12 @@ slam_toolbox:
     ceres_loss_function: None
 
     # ROS Parameters
-    # base_frame/odom_frame match the sentry URDF's root link and the
-    # OdometryPublisher plugin's frames (see sim/urdf/sentry.urdf.xacro),
-    # so this works unmodified against the sim package's odom->root TF.
-    odom_frame: odom
+    # Karto caches scan->base once. The head moves relative to root, so use
+    # lidar as the tracking base and carry head motion in nav_odom->lidar TF.
+    # AMCL/rf2o and the public navigation pose continue to use root.
+    odom_frame: nav_odom
     map_frame: map
-    base_frame: root
+    base_frame: lidar
     scan_topic: /scan
     use_map_saver: true
     mode: localization
@@ -25,7 +25,7 @@ slam_toolbox:
     transform_publish_period: 0.02 #if 0 never publishes odometry
     map_update_interval: 5.0
     resolution: 0.05
-    min_laser_range: 0.15 # matches RPLIDAR A2M8 min range
+    min_laser_range: 0.15 # margin over the A2M8's 0.05 m minimum; see README Notes
     max_laser_range: 12.0 # matches RPLIDAR A2M8 max range
     # Was 0.5 -- raised to 1.0 (fewer, higher-baseline scan matches during
     # fast cornering) after measuring lowering it to 0.1 made
@@ -49,8 +49,8 @@ slam_toolbox:
     # minimum_travel_distance: 0.1 (was 0.5) -- 0.5m let sudden position
     # jerks (wheel slip, collisions) go unnoticed by slam_toolbox when the
     # robot was stationary/slow, since wheel odometry can't see them.
-    # minimum_travel_heading is irrelevant (chassis never rotates heading)
-    # but left small, not 0. See README.md Notes for the verification.
+    # Heading now measures lidar/head rotation, including a parked head sweep.
+    # See README.md Notes for the rigid-mount requirement.
     minimum_travel_distance: 0.1
     minimum_travel_heading: 0.05
     scan_buffer_size: 10
