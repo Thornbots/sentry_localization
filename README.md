@@ -512,11 +512,11 @@ AMCL **always waits for actual REF_SYS**, including in a no-referee room
 workflow. Its process, map server and lifecycle manager do not start before
 the first valid team; startup then sets the team-start prior at root yaw zero.
 There is no default team or global-localization fallback. Saved-map `slam`
-localization uses the same gate and team-start `map_start_pose`. Mapping bypasses
-that field prior: a blank map starts at map `(0, 0, 0)` using the inverse first
-navigation pose as SLAM Toolbox's reprocessing transform; loading a graph for
-mapping retains its zero map start. Navigation can therefore remain field-offset
-while a new map uses a local zero origin.
+localization and saved-graph mapping refinement use the same gate and team-start
+`map_start_pose`. Blank mapping bypasses that field prior: it starts at map
+`(0, 0, 0)` using the inverse first navigation pose as SLAM Toolbox's
+reprocessing transform. Navigation can therefore remain field-offset while a
+new map uses a local zero origin.
 
 For another field, register the occupancy map using the
 [operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow).
