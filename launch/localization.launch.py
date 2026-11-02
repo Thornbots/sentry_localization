@@ -59,6 +59,12 @@ def generate_launch_description():
         'navigation reference, with axes aligned to raw odom.'
     )
 
+    slam_input_frame_arg = DeclareLaunchArgument(
+        'slam_input_frame', default_value='',
+        description='SLAM scan-prior frame; empty uses odom_frame, '
+        'odom tests raw input with EKF retained.'
+    )
+
     load_map_arg = DeclareLaunchArgument(
         'load_map', default_value='true',
         description="Deserialize map_file's saved pose graph at startup and "
@@ -310,6 +316,8 @@ def generate_launch_description():
         params = {
             'use_sim_time': use_sim_time,
             'odom_frame': LaunchConfiguration('odom_frame'),
+            'slam_input_frame': ParameterValue(
+                LaunchConfiguration('slam_input_frame'), value_type=str),
             'mode': slam_toolbox_mode_param,
             'use_map_saver': ParameterValue(mapping_selected, value_type=bool),
             'zero_origin_mapping': mapping and not load_map,
@@ -320,14 +328,14 @@ def generate_launch_description():
         if load_map:
             params.update({
                 'map_file_name': LaunchConfiguration('map_file'),
-                'map_start_pose': [0.0, 0.0, 0.0],
             })
         return Node(
             package='sentry_localization',
-            executable='localization_backend' if mapping else 'seeded_ekf',
+            executable='seeded_ekf' if load_map else 'localization_backend',
             name='slam_container',
-            arguments=['slam'] if mapping else [
-                *start_arguments, '--seed-use-sim-time', use_sim_time, '--backend', 'slam'],
+            arguments=[
+                *start_arguments, '--seed-use-sim-time', use_sim_time, '--backend', 'slam']
+            if load_map else ['slam'],
             output='screen',
             condition=IfCondition(condition), parameters=[slam_params_file, params])
 
@@ -357,7 +365,7 @@ def generate_launch_description():
           for name in ['initial_x', 'initial_y', 'amcl_initial_x', 'amcl_initial_y',
                        'amcl_initial_yaw']],
         use_sim_time_arg,
-        odom_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
+        odom_frame_arg, slam_input_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
         passthrough_odom_node, ekf_input_node, ekf_node,
         scan_odom_node, scan_navigation_node, map_pose_node, map_autosaver_node,

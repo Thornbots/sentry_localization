@@ -64,6 +64,11 @@ Other args:
 - `load_map` (default `true`): load the saved pose graph at startup
   (`slam`/`mapping` only).
 - `odom_frame` (default `nav_odom`).
+- `slam_input_frame` (default empty): scan-prior/gating frame for SLAM only.
+  Empty uses `odom_frame`; `odom` tests raw wheel input while retaining the EKF.
+  The backend still publishes its correction relative to `odom_frame`, using
+  the corrected lidar pose and stamped TF. This is an opt-in experiment, not a
+  validated tuning recommendation.
 - `use_sim_time`: set by `auto.launch.py` from `real_hardware`.
 - `autosave_map` (default `false`; `auto.launch.py` passes `real_hardware`):
   under `mapping`, `map_autosaver` saves `map.posegraph/.data`
@@ -73,8 +78,9 @@ Other args:
   (30 s). Not slam_toolbox's `save_map`: its `map_saver_cli` process must
   find `/map` within 2 s, and on the sentry mostly didn't. Load one back
   with `load_map:=true map_file:=<dir>/map`. Saved-map startup currently
-  uses the actual referee team's start for `slam` localization. Mapping with a
-  saved graph keeps `map_start_pose: [0, 0, 0]`; blank mapping cancels the first
+  uses the actual referee team's configured start for both `slam` localization
+  and `mapping` refinement of a saved graph. Set `red_start_x/y` and
+  `blue_start_x/y` in bringup to the surveyed event-map spawn. Blank mapping cancels the first
   navigation pose so its first map pose is also zero. Graph registration on a
   different field still needs [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
 
@@ -435,6 +441,16 @@ Back to back on a quiet host against plain `slam`: `drift_correction`
 reading the code rather than bags: `slam_toolbox` corrects relative to its
 `odom_frame`, which here is the EKF output, so the EKF's rf2o position
 correction and slam_toolbox's correction stack on the same lidar data.
+
+`slam_input_frame:=odom` tests that hypothesis without dropping the EKF. The
+composed backend replaces slam_toolbox's protected pose helper after configure,
+so scan priors and motion gates read `odom->lidar`. Its `odom_frame` remains
+`nav_odom`: upstream `setTransformFromPoses` rebases the corrected lidar pose
+through stamped TF before publishing. This uses a protected Jazzy API rather
+than an upstream supported parameter; recheck it on slam_toolbox upgrades.
+The default empty input frame leaves the upstream helper unchanged. Historical
+figures above are correction metrics and cannot establish truth-error parity.
+
 
 ### Measurement caveats
 

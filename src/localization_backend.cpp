@@ -86,9 +86,25 @@ public:
   : slam_toolbox::AsynchronousSlamToolbox(options)
   {
     declare_parameter("zero_origin_mapping", false);
+    declare_parameter("slam_input_frame", "");
   }
 
 protected:
+  CallbackReturn on_configure(const rclcpp_lifecycle::State & state) override
+  {
+    const auto result = slam_toolbox::AsynchronousSlamToolbox::on_configure(state);
+    if (result == CallbackReturn::SUCCESS) {
+      const auto input = get_parameter("slam_input_frame").as_string();
+      if (!input.empty()) {
+        // Only scan priors/gates change. setTransformFromPoses still rebases
+        // the corrected base pose onto odom_frame_ for the public TF edge.
+        pose_helper_ = std::make_unique<pose_utils::GetPoseHelper>(
+          tf_.get(), base_frame_, input);
+      }
+    }
+    return result;
+  }
+
   karto::LocalizedRangeScan * addScan(
     karto::LaserRangeFinder * laser,
     const sensor_msgs::msg::LaserScan::ConstSharedPtr & scan, karto::Pose2 & odom_pose) override
