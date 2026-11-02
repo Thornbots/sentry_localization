@@ -271,7 +271,9 @@ noise against sim's exact odometry, not from the obstacle. To go lower, step
 to 0.075 then 0.0625, check for the crash each time, and test drift and
 obstacle cases together.
 
-**sigma_hit: 0.08** (stock 0.2). The likelihood field is nearly flat within
+**sigma_hit: 0.08** (stock 0.2). `amcl_sigma_hit` overrides this value through
+`auto.launch.py` for repeatable tuning trials; the default remains 0.08.
+The likelihood field is nearly flat within
 about one sigma, so at 0.2 amcl can't tell poses within ~0.2m apart. That
 matched `unmapped_obstacle`'s ~0.2-0.3m noise floor, where the alpha,
 `resample_interval` and particle knobs all plateaued, pointing at the sensor

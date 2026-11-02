@@ -65,6 +65,10 @@ def generate_launch_description():
         'odom tests raw input with EKF retained.'
     )
 
+    amcl_sigma_hit_arg = DeclareLaunchArgument(
+        'amcl_sigma_hit', default_value='0.08',
+        description='AMCL likelihood-field width in metres; override for tuning trials.')
+
     load_map_arg = DeclareLaunchArgument(
         'load_map', default_value='true',
         description="Deserialize map_file's saved pose graph at startup and "
@@ -302,6 +306,7 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(amcl_selected),
         parameters=[amcl_params_file, {
+            'sigma_hit': ParameterValue(LaunchConfiguration('amcl_sigma_hit'), value_type=float),
             'use_sim_time': use_sim_time,
             'yaml_filename': map_yaml_file,
             'odom_frame_id': LaunchConfiguration('odom_frame'),
@@ -365,7 +370,8 @@ def generate_launch_description():
           for name in ['initial_x', 'initial_y', 'amcl_initial_x', 'amcl_initial_y',
                        'amcl_initial_yaw']],
         use_sim_time_arg,
-        odom_frame_arg, slam_input_frame_arg, load_map_arg, map_file_arg, localization_mode_arg,
+        odom_frame_arg, slam_input_frame_arg, amcl_sigma_hit_arg, load_map_arg, map_file_arg,
+        localization_mode_arg,
         use_rf2o_arg, autosave_map_arg, map_save_dir_arg, map_save_period_s_arg,
         passthrough_odom_node, ekf_input_node, ekf_node,
         scan_odom_node, scan_navigation_node, map_pose_node, map_autosaver_node,
