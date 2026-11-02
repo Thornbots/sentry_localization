@@ -94,9 +94,29 @@ def saver(tmp_path):
     try:
         wait(client.service_is_ready)
         wait(lambda: publisher.get_subscription_count() > 0)
-        # Let the serialization client discover its server before the first request.
-        ready = time.monotonic() + 0.3
-        wait(lambda: time.monotonic() >= ready)
+        # An empty destination checks map delivery and backend discovery without saving.
+        minimum = node.get_clock().now().to_msg()
+        publish()
+        probe = None
+
+        def backend_ready():
+            nonlocal probe
+            if probe is None:
+                probe = client.call_async(SaveMap.Request(minimum_stamp=minimum))
+            if not probe.done():
+                return False
+            response = probe.result()
+            assert not response.success
+            if response.message in (
+                    'map or serialize_map service unavailable',
+                    'map is stale, predates start/reset, future-dated or outside map frame'):
+                publish()
+                probe = None
+                return False
+            assert response.message == 'directory cannot be empty', response.message
+            return True
+
+        wait(backend_ready)
         yield node, behavior, request, wait, publish
     finally:
         process.terminate()
