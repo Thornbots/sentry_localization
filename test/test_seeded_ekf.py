@@ -290,7 +290,7 @@ def test_launch_gates_amcl_independently_of_room_navigation(monkeypatch, require
                                         ('/localization/odom', '/localization/scan_odom')]
 
 
-def test_launch_only_saved_localization_gets_team_map_prior_mapping_keeps_zero(monkeypatch):
+def test_launch_saved_graphs_get_team_map_prior_blank_mapping_keeps_zero(monkeypatch):
     actions, _ = load_launch(
         monkeypatch, Path(__file__).parents[1] / 'launch/localization.launch.py')
     slam = [a for a in actions if a.kwargs.get('name') == 'slam_container']
@@ -298,10 +298,11 @@ def test_launch_only_saved_localization_gets_team_map_prior_mapping_keeps_zero(m
     localization, loaded_mapping, blank_mapping = slam
     assert localization.kwargs['executable'] == 'seeded_ekf'
     assert localization.kwargs['arguments'][-2:] == ['--backend', 'slam']
-    for mapping in (loaded_mapping, blank_mapping):
-        assert mapping.kwargs['executable'] == 'localization_backend'
-        assert mapping.kwargs['arguments'] == ['slam']
-    assert loaded_mapping.kwargs['parameters'][1]['map_start_pose'] == [0.0, 0.0, 0.0]
+    assert loaded_mapping.kwargs['executable'] == 'seeded_ekf'
+    assert loaded_mapping.kwargs['arguments'][-2:] == ['--backend', 'slam']
+    assert blank_mapping.kwargs['executable'] == 'localization_backend'
+    assert blank_mapping.kwargs['arguments'] == ['slam']
+    assert 'map_start_pose' not in loaded_mapping.kwargs['parameters'][1]
     assert 'map_start_pose' not in blank_mapping.kwargs['parameters'][1]
     assert blank_mapping.kwargs['parameters'][1]['zero_origin_mapping'] is True
     assert loaded_mapping.kwargs['parameters'][1]['zero_origin_mapping'] is False
