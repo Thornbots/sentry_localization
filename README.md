@@ -272,9 +272,8 @@ matched `unmapped_obstacle`'s ~0.2-0.3m noise floor, where the alpha,
 model. Sim's lidar matches the RPLIDAR A2M8's 720-bin grid with 0.01 m
 noise ([sim README](../sim/README.md#lidar-format-and-model-limits)) and runs
 on the real field mesh. 0.15 measured worse (see Tuning history), but on the
-old noise model, and nothing has been re-measured since. Re-derive
-rather than treating 0.08 as final, and check a sharper field doesn't make
-amcl brittle to real sensor noise.
+old noise model, and nothing has been re-measured since. Live remeasurement is tracked in [H-amcl-noise](../docs/ROADMAP.md#additional-mini-work);
+0.08 remains a starting value, not a completed calibration.
 
 **do_beamskip: true** (stock `false`, 2026-07-21) drops beams that disagree
 with the map from the weight update. It didn't fix the wobble (0.409m after,
@@ -365,8 +364,8 @@ blanks only a CAD-derived 5-81 deg sector whose real zero direction is
 unmeasured, the head-fixed parts start 0.045 m from the lidar, and the
 2026-10-18 robot capture logged per-scan statistics, not per-beam ranges
 (0.05-0.15 m returns were never inspected). Sim cannot test it: its lidar never
-sees the robot. Lower it only after a real `/scan_raw` shows nothing of the
-robot between 0.05 and 0.15 m.
+sees the robot. The physical range/mount gate is maintained in
+[ROBOT_TESTS LIDAR-mount](../docs/ROBOT_TESTS.md#consolidated-hardware-checks).
 
 **correlation_search_space_dimension: 2.5** (was 0.5) and
 **minimum_time_interval: 1.0** (was 0.5), `f23c6be`: see Tuning history.
