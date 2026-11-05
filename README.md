@@ -75,8 +75,9 @@ Other args:
   with `load_map:=true map_file:=<dir>/map`. Saved-map startup currently
   uses the actual referee team's start for `slam` localization. Mapping with a
   saved graph keeps `map_start_pose: [0, 0, 0]`; blank mapping cancels the first
-  navigation pose so its first map pose is also zero. Graph registration on a
-  different field still needs [track H's carried-map work](../docs/ROADMAP.md#h-slam-at-amcls-level).
+  navigation pose so its first map pose is also zero. Matches use `amcl`; `slam`
+  is second class, so graph registration on a different field is unsupported
+  ([policy](../docs/ROADMAP.md#localization-policy)).
 
 ### Explicit mapping snapshots
 
