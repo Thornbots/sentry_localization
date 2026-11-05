@@ -115,23 +115,25 @@ class SliceTest(unittest.TestCase):
 
 
 class FieldMapTest(unittest.TestCase):
-    def test_saved_images_decode_corrected_bar_and_unknown_regions(self):
+    def test_saved_image_decodes_s2_lidar_slice_and_unknown_regions(self):
         meta, pixels, decoded = decode_saved('clean_map')
         self.assertEqual(meta['resolution'], .02)
         self.assertEqual(meta['origin'], [-6.230545, -4.249455, 0.0])
         self.assertEqual(pixels.shape, (424, 624))
         values, counts = np.unique(decoded, return_counts=True)
-        self.assertEqual(dict(zip(values, counts)), {-1: 27594, 0: 226554, 100: 10428})
+        self.assertEqual(dict(zip(values, counts)), {-1: 27928, 0: 227149, 100: 9499})
         self.assertEqual(set(np.unique(pixels)), {0, 128, 254})
         self.assertTrue(np.all(decoded[pixels == 0] == 100))
         self.assertTrue(np.all(decoded[pixels == 128] == -1))
         self.assertTrue(np.all(decoded[pixels == 254] == 0))
-        for x in [-.8, 0, .8]:
-            self.assertEqual(pixel_at(decoded, meta, x, 2.99), 100)
-            self.assertEqual(pixel_at(decoded, meta, x, 2.8), 0)
-        self.assertEqual(pixel_at(decoded, meta, 0, 0), 0)
-        self.assertEqual(pixel_at(decoded, meta, 0, 4.15), -1)
-        self.assertEqual(pixel_at(decoded, meta, 0, -2.8), -1)
+        # (x, y, cell) at the 0.357 m slice; README "Saved map" lists what it sees.
+        for x, y, cell in [(.08, 0, 100), (0, 0, -1), (.5, 0, 0),  # Central Wall base
+                           (0, 1.6, 0), (0, 1.98, 100),  # under the Limbo Bar, its post
+                           (-3, -2.5, 100), (3, -2.5, 100), (-3.5, -2.5, -1),  # 0.41 m tiers
+                           (-3.5, -1.5, 0), (0, 3, 0),  # 0.21 m platforms
+                           (-3.5, -3.25, 100), (-3.5, -3.5, 0),  # Side Limbo spacer, bars
+                           (-4, -.635, 0), (-5.25, -3, 0), (0, 4.2, -1)]:
+            self.assertEqual(pixel_at(decoded, meta, x, y), cell, (x, y))
 
     def test_metadata_rejects_incompatible_modes_negate_and_thresholds(self):
         meta = yaml.safe_load((ROOT / 'map/clean_map.yaml').read_text())
@@ -162,6 +164,22 @@ class FieldMapTest(unittest.TestCase):
         self.assertEqual(image[20, 30], 0)
         self.assertEqual(image[20, 35], 128)
 
+    def test_seed_selects_flood_fill_start(self):
+        triangles = []
+        corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+        for i, (x, y) in enumerate(corners):
+            u, v = corners[(i+1) % 4]
+            triangles.extend([[[x, y, -1], [u, v, -1], [u, v, 1]],
+                              [[x, y, -1], [u, v, 1], [x, y, 1]]])
+        triangles = np.array(triangles) + [3, 0, 0]  # enclosure no longer covers (0, 0)
+        with self.assertRaisesRegex(ValueError, 'leaks'):
+            field_map.rasterize(triangles, 0, .1, [-2, -2], (40, 70))
+        image = np.flipud(field_map.rasterize(triangles, 0, .1, [-2, -2], (40, 70), seed=(3, 0)))
+        self.assertEqual(image[20, 50], 254)
+        self.assertEqual(image[20, 20], 128)
+        with self.assertRaisesRegex(ValueError, 'seed'):
+            field_map.rasterize(triangles, 0, .1, [-2, -2], (40, 70), seed=(4, 0))
+
     def test_leaking_geometry_rejected(self):
         with self.assertRaisesRegex(ValueError, 'leaks'):
             field_map.rasterize(np.zeros((1, 3, 3)), .35, .1, [-1, -1], (20, 20))
@@ -174,7 +192,7 @@ class FieldMapTest(unittest.TestCase):
             (root / 'triangle.stl').write_bytes(b'\0'*80 + struct.pack('<I', 1) +
                                                struct.pack('<12fH', 0., 0., 1., *vertices, 0))
             world = root / 'world/fixture.sdf'
-            world.write_text('<sdf><world><model name="ARCC_Field_2026">'
+            world.write_text('<sdf><world name="field"><model name="any_field">'
                              '<pose>1 2 0 0 0 1.5707963267948966</pose>'
                              '<link><pose>1 0 0 0 0 0</pose><collision>'
                              '<pose>0 0 .5 0 0 0</pose><geometry><mesh>'
@@ -182,6 +200,9 @@ class FieldMapTest(unittest.TestCase):
                              '</mesh></geometry></collision></link></model></world></sdf>')
             np.testing.assert_allclose(field_map.load_world_triangles(world),
                                        [[[1, 3, .5], [1, 5, .5], [-2, 3, .5]]], atol=1e-12)
+            world.write_text('<sdf><world name="field"></world></sdf>')
+            with self.assertRaisesRegex(ValueError, 'no field model'):
+                field_map.load_world_triangles(world)
 
     def test_invalid_stl_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
