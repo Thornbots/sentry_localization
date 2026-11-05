@@ -46,9 +46,7 @@ source, with any mode:
 | `false` | `passthrough_odom_publisher`, raw pose plus team start, labeled `nav_odom` |
 | `true` | `ekf_input_publisher` supplies root velocity/fixed heading; `ekf_node` fuses these with rf2o's team-offset `/localization/scan_odom` position |
 
-`true` is the default in both this file and `auto.launch.py` (since
-2026-09-20), so the stack runs rf2o + the EKF unless you pass
-`use_rf2o:=false`.
+`true` is the default here and in `auto.launch.py` (since 2026-09-20).
 
 `use_rf2o:=true` also starts `rf2o_laser_odometry_node` on raw `/scan`. The
 Thornbots fork re-queries `lidar->root` every scan, so the head-mounted lidar
@@ -121,9 +119,10 @@ writes; hidden staging directories can remain after process shutdown and are
 never published as successful snapshots. Explicit directories are separate from
 periodic backups. Backends and noise parameters are unchanged.
 
-Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_pose_publisher` (math in
-`map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/src/mcb_relay.cpp` compares
-`/localization/odom` with raw `/odom` plus its last sent navigation offset.
+Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`,
+`map_pose_publisher` (math in `map_pose_core`) and `map_autosaver` (file writers
+in `map_image`). The relay's use of `/localization/odom` is in
+[thornbots_pkg](../thornbots_pkg/README.md#mcb_relay).
 
 ## Testing
 
@@ -161,10 +160,9 @@ one already rejected.
   response cannot race discovery of a remote client's response reader. Each
   component has its own executor; the manager can wait for a transition while
   the backend services it. This uses the existing transition and bond deadlines.
-- rf2o used to cache its lidar->root transform from the first scan, which
-  assumes a rigid mount. The fork (built by `isaac_ros_common`'s Dockerfile)
-  re-queries every scan, so the old `head_home_scan_gate` and its
-  `/scan_gated` topic are gone.
+- The rf2o fork (built by `isaac_ros_common`'s Dockerfile) re-queries
+  `lidar->root` every scan instead of caching the first, so the head-mounted
+  lidar needs no scan gate.
 - rf2o runs with `fixed_heading: true` and `odom_prior_topic: /odom`. The
   `root` is heading-fixed (the chassis yaw is a joint below it), so rf2o's
   accumulated yaw error would only rotate its x/y. Its own velocity prior is the previous scan's motion, so every move
@@ -449,7 +447,6 @@ correction and slam_toolbox's correction stack on the same lidar data.
 - Geometry changes invalidate baselines. The 0.1642m `amcl+ekf` result and
   the 0.20m threshold came from a 2m loop (corners ~1.80m from spawn), before
   `4f182e7` widened it to 3m (~2.12m).
-
 
 ### Initial field position
 
