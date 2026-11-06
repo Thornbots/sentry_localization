@@ -114,6 +114,10 @@ def main(argv=None):
     parser.add_argument('--require-team', action='store_true')
     parser.add_argument('--team', choices=['red', 'blue'])
     parser.add_argument('--backend', choices=['amcl', 'slam'])
+    parser.add_argument('--known-team', choices=['none', 'red', 'blue'], default='none',
+                        help='Simulation epoch zero: the team and its start are known, so '
+                        'start now from that start instead of waiting for referee and /odom '
+                        'data, whose arrival would set the process start time. EKF only.')
     for team in ('red', 'blue'):
         for axis in ('x', 'y'):
             parser.add_argument(f'--{team}-start-{axis}', type=float, required=True)
@@ -126,17 +130,23 @@ def main(argv=None):
         from ament_index_python.packages import get_package_prefix
 
         if options.backend:
-            seed = wait_for_seed(options.seed_use_sim_time == 'true', require_team=True,
-                                 team_only=True, starts=starts)
             executable = os.path.join(get_package_prefix('sentry_localization'),
                                       'lib', 'sentry_localization', 'localization_backend')
             command = [executable, options.backend, *ros_arguments]
         else:
-            seed = wait_for_seed(options.seed_use_sim_time == 'true',
-                                 options.require_team, options.team, starts=starts)
             executable = os.path.join(
                 get_package_prefix('robot_localization'), 'lib', 'robot_localization', 'ekf_node')
             command = [executable, *ros_arguments]
+        if options.known_team != 'none' and options.backend:
+            parser.error('--known-team is for the EKF; the map backend waits for the referee')
+        if options.known_team != 'none':
+            seed = list(starts[options.known_team == 'blue']) + [0.0] * 13
+        elif options.backend:
+            seed = wait_for_seed(options.seed_use_sim_time == 'true', require_team=True,
+                                 team_only=True, starts=starts)
+        else:
+            seed = wait_for_seed(options.seed_use_sim_time == 'true',
+                                 options.require_team, options.team, starts=starts)
         if '--ros-args' not in ros_arguments:
             command.append('--ros-args')
         if options.backend == 'amcl':

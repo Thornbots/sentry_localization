@@ -337,3 +337,26 @@ def test_valid_referee_without_fresh_raw_seed_times_out_without_ekf(monkeypatch,
     assert executed == []
     assert node.destroyed
     assert 'within 15 s' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('blue', [False, True])
+def test_known_team_starts_ekf_at_once_from_team_start_without_ros(monkeypatch, blue):
+    monkeypatch.setitem(sys.modules, 'rclpy', None)  # a wait would fail to import it
+    executed = []
+    monkeypatch.setattr(gate.os, 'execvp', lambda path, command: executed.append((path, command)))
+    args = ['--seed-use-sim-time', 'true', '--known-team', 'blue' if blue else 'red']
+    assert gate.main(START_ARGS + args + ['--ros-args', '-r', '__node:=x']) == 0
+    path, command = executed[0]
+    start, start_y = STARTS[blue]
+    assert path == '/overlay/robot_localization/lib/robot_localization/ekf_node'
+    assert command[-2:] == ['-p', 'initial_state:=' + json.dumps([start, start_y] + [0.0] * 13)]
+
+
+@pytest.mark.parametrize('backend', ['amcl', 'slam'])
+def test_known_team_is_rejected_for_map_backends(monkeypatch, backend):
+    executed = []
+    monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
+    with pytest.raises(SystemExit):
+        gate.main(START_ARGS + ['--seed-use-sim-time', 'true', '--known-team', 'blue',
+                                '--backend', backend])
+    assert executed == []
