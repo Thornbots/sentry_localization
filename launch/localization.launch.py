@@ -20,7 +20,9 @@ Raw odom->root and translation-only nav_odom->odom TF belong to thornbots_pkg.
 The EKF input adapter pins root heading without reading its output TF.
 See README.md for the backend table, frame contract and map loading.
 """
+import atexit
 import os
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 
@@ -205,6 +207,14 @@ def generate_launch_description():
             arguments.append('--require-team')
         elif context.launch_configurations.get('seed_explicit_team', ''):
             arguments.extend(['--team', context.launch_configurations['seed_explicit_team']])
+        # A node-specific file entry, since ekf.yaml's outranks a wildcard (`/**`) override.
+        override_files = []
+        if context.launch_configurations.get('ekf_frequency_hz', ''):
+            frequency = float(context.launch_configurations['ekf_frequency_hz'])
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as handle:
+                handle.write(f'ekf_filter_node:\n  ros__parameters:\n    frequency: {frequency!r}\n')
+            atexit.register(os.unlink, handle.name)
+            override_files.append(handle.name)
         node = Node(
             package='sentry_localization', executable='seeded_ekf',
             arguments=arguments,
@@ -223,6 +233,7 @@ def generate_launch_description():
                     'world_frame': LaunchConfiguration('odom_frame'),
                     'publish_tf': False,
                 },
+                *override_files,
             ],
         )
 
@@ -353,6 +364,10 @@ def generate_launch_description():
         DeclareLaunchArgument('seed_explicit_team', default_value='', choices=['', 'red', 'blue'],
                               description='Practice navigation team only when seed_require_team '
                               'is false; never bypasses map localization referee gate.'),
+        DeclareLaunchArgument('ekf_frequency_hz', default_value='',
+                              description='Simulation only: replaces config/ekf.yaml '
+                                          'frequency (empty keeps it); a lockstep '
+                                          'simulation uses a whole-millisecond period'),
         DeclareLaunchArgument('seed_known_team', default_value='none',
                               choices=['none', 'red', 'blue'],
                               description='Simulation only: start the EKF at once from this '

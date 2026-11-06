@@ -492,7 +492,10 @@ also accepted but no longer override initialization.
 Simulation only: `seed_known_team:=red|blue` (default `none`) starts the EKF at
 once from that team's start, skipping its wait for referee and raw odometry, so
 the EKF's start is not set by data latency (the simulator's epoch-zero startup
-uses it). AMCL and SLAM keep their referee wait.
+uses it). AMCL and SLAM keep their referee wait. Also simulation only,
+`ekf_frequency_hz` (default empty, keeping `config/ekf.yaml`'s 30 Hz) replaces the EKF
+frequency; a lockstep simulation sets 29.4 Hz, a 34 ms period, so every EKF tick lands on one
+whole-millisecond clock value.
 
 AMCL **always waits for actual REF_SYS**, including in a no-referee room
 workflow. Its process, map server and lifecycle manager do not start before
