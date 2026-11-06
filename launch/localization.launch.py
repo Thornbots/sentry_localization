@@ -184,7 +184,7 @@ def generate_launch_description():
                          LaunchConfiguration('seed_require_team'), value_type=bool),
                      'explicit_team': ParameterValue(
                          LaunchConfiguration('seed_explicit_team'), value_type=str)}],
-        remappings=[('/odom', '/scan_odom'),
+        remappings=[('/odom', LaunchConfiguration('scan_navigation_odom_topic')),
                     ('/localization/odom', '/localization/scan_odom')],
     )
 
@@ -266,6 +266,10 @@ def generate_launch_description():
             # constant-velocity guess undershoots every move from rest.
             'odom_prior_topic': '/odom',
             'use_sim_time': use_sim_time,
+            # Simulation only; 0 keeps the robot's behavior.
+            'extrinsic_lookahead_s': ParameterValue(PythonExpression(
+                ["float('", LaunchConfiguration('rf2o_extrinsic_lookahead_s'), "' or 0.0)"]),
+                value_type=float),
         }],
     )
 
@@ -364,6 +368,13 @@ def generate_launch_description():
         DeclareLaunchArgument('seed_explicit_team', default_value='', choices=['', 'red', 'blue'],
                               description='Practice navigation team only when seed_require_team '
                               'is false; never bypasses map localization referee gate.'),
+        DeclareLaunchArgument('scan_navigation_odom_topic', default_value='/scan_odom',
+                              description='rf2o odometry the navigation adapter reads; a '
+                                          'lockstep simulation inserts a gate'),
+        DeclareLaunchArgument('rf2o_extrinsic_lookahead_s', default_value='',
+                              description='Simulation only: rf2o waits for TF this far past '
+                                          'each scan stamp (empty keeps 0), so a lockstep '
+                                          'lookup never depends on message timing'),
         DeclareLaunchArgument('ekf_frequency_hz', default_value='',
                               description='Simulation only: replaces config/ekf.yaml '
                                           'frequency (empty keeps it); a lockstep '
