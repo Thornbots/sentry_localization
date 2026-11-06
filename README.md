@@ -489,6 +489,10 @@ team's start to a near-zero raw seed. These options affect navigation only.
 `seed_from_raw_odom` remains accepted for compatibility; raw seeding is always
 used. The former `initial_x/y` and `amcl_initial_x/y/yaw` launch arguments are
 also accepted but no longer override initialization.
+Simulation only: `seed_known_team:=red|blue` (default `none`) starts the EKF at
+once from that team's start, skipping its wait for referee and raw odometry, so
+the EKF's start is not set by data latency (the simulator's epoch-zero startup
+uses it). AMCL and SLAM keep their referee wait.
 
 AMCL **always waits for actual REF_SYS**, including in a no-referee room
 workflow. Its process, map server and lifecycle manager do not start before

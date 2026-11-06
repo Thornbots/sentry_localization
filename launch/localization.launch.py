@@ -199,7 +199,8 @@ def generate_launch_description():
     )
 
     def make_ekf(context):
-        arguments = [*start_arguments, '--seed-use-sim-time', use_sim_time]
+        arguments = [*start_arguments, '--seed-use-sim-time', use_sim_time,
+                     '--known-team', context.launch_configurations.get('seed_known_team', 'none')]
         if context.launch_configurations['seed_require_team'].lower() == 'true':
             arguments.append('--require-team')
         elif context.launch_configurations.get('seed_explicit_team', ''):
@@ -352,6 +353,12 @@ def generate_launch_description():
         DeclareLaunchArgument('seed_explicit_team', default_value='', choices=['', 'red', 'blue'],
                               description='Practice navigation team only when seed_require_team '
                               'is false; never bypasses map localization referee gate.'),
+        DeclareLaunchArgument('seed_known_team', default_value='none',
+                              choices=['none', 'red', 'blue'],
+                              description='Simulation only: start the EKF at once from this '
+                              'team\'s start instead of waiting for referee and /odom data, so '
+                              'its timer phase is not set by data latency. The map backend '
+                              'keeps its referee gate.'),
         *[DeclareLaunchArgument(name, default_value='0.0',
                                 description='Deprecated; initialization uses raw /odom and team.')
           for name in ['initial_x', 'initial_y', 'amcl_initial_x', 'amcl_initial_y',
