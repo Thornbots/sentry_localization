@@ -286,8 +286,10 @@ def test_launch_gates_amcl_independently_of_room_navigation(monkeypatch, require
     assert amcl.kwargs['arguments'][-2:] == ['--backend', 'amcl']
     assert not any(key.startswith('initial_pose') for key in amcl.kwargs['parameters'][1])
     scan = next(a for a in actions if a.kwargs.get('name') == 'scan_navigation_publisher')
-    assert scan.kwargs['remappings'] == [('/odom', '/scan_odom'),
-                                        ('/localization/odom', '/localization/scan_odom')]
+    remappings = scan.kwargs['remappings']
+    assert remappings[0][0] == '/odom'
+    assert remappings[0][1].args == ('scan_navigation_odom_topic',)
+    assert remappings[1:] == [('/localization/odom', '/localization/scan_odom')]
 
 
 def test_launch_only_saved_localization_gets_team_map_prior_mapping_keeps_zero(monkeypatch):

@@ -496,6 +496,8 @@ uses it). AMCL and SLAM keep their referee wait. Also simulation only,
 `ekf_frequency_hz` (default empty, keeping `config/ekf.yaml`'s 30 Hz) replaces the EKF
 frequency; a lockstep simulation sets 29.4 Hz, a 34 ms period, so every EKF tick lands on one
 whole-millisecond clock value.
+`rf2o_extrinsic_lookahead_s` (default empty, meaning 0) is the matching rf2o option for a lockstep simulation:
+[its README](../rf2o_laser_odometry/README.md#extrinsic-lookahead) says why.
 
 AMCL **always waits for actual REF_SYS**, including in a no-referee room
 workflow. Its process, map server and lifecycle manager do not start before
