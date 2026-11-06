@@ -31,7 +31,7 @@ from launch.actions import DeclareLaunchArgument, EmitEvent, OpaqueFunction, Reg
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -152,6 +152,18 @@ def generate_launch_description():
         ["'", LaunchConfiguration('map_file'), "' + '.yaml'"]
     )
 
+    # Profile choice follows remote_dds, declared by thornbots_pkg's auto.launch.py
+    # (default $THORNBOTS_REMOTE_DDS): loopback-only twin unless on. SYSTEM_DEFAULT
+    # because LOCALHOST would add the shared-memory transport back.
+    no_shm_env = {
+        'FASTRTPS_DEFAULT_PROFILES_FILE': PythonExpression([
+            "'", os.path.join(pkg_share, 'config', 'fastdds_no_shm'), "' + ('' if '",
+            LaunchConfiguration('remote_dds', default=EnvironmentVariable(
+                'THORNBOTS_REMOTE_DDS', default_value='false')),
+            "'.lower() in ('1', 'true') else '_local') + '.xml'"]),
+        'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SYSTEM_DEFAULT',
+    }
+
     # UDP-only FastDDS profile (config/fastdds_no_shm.xml): SharedMemTransport
     # init was seen hanging at node startup when /dev/shm held stale
     # fastrtps_* segments from SIGKILLed runs. Same fix as thornbots_pkg's
@@ -168,11 +180,7 @@ def generate_launch_description():
                          LaunchConfiguration('seed_require_team'), value_type=bool),
                      'explicit_team': ParameterValue(
                          LaunchConfiguration('seed_explicit_team'), value_type=str)}],
-        additional_env={
-            'FASTRTPS_DEFAULT_PROFILES_FILE': os.path.join(
-                pkg_share, 'config', 'fastdds_no_shm.xml'
-            )
-        },
+        additional_env=no_shm_env,
     )
 
     scan_navigation_node = Node(
@@ -196,8 +204,7 @@ def generate_launch_description():
         condition=IfCondition(ekf_selected),
         parameters=[{'use_sim_time': use_sim_time,
                      'navigation_frame': LaunchConfiguration('odom_frame')}],
-        additional_env={'FASTRTPS_DEFAULT_PROFILES_FILE': os.path.join(
-            pkg_share, 'config', 'fastdds_no_shm.xml')},
+        additional_env=no_shm_env,
     )
 
     def make_ekf(context):
