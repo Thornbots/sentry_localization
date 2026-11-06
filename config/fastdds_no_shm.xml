@@ -10,6 +10,11 @@ kept as this package's own copy rather than reaching into thornbots_pkg's share
 dir, since it's a small static file and this package has no other dependency
 on thornbots_pkg. Applied to just this node via FASTRTPS_DEFAULT_PROFILES_FILE
 in localization.launch.py.
+
+This file lists no initial peers, so it never sent to the robots' Tailscale
+addresses; it is the remote_dds:=true profile. With remote_dds off (the default)
+fastdds_no_shm_local.xml is used instead: loopback only, because the
+default multicast would still announce on every interface.
 -->
 <dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
     <profiles>
