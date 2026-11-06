@@ -496,6 +496,12 @@ uses it). AMCL and SLAM keep their referee wait. Also simulation only,
 `ekf_frequency_hz` (default empty, keeping `config/ekf.yaml`'s 30 Hz) replaces the EKF
 frequency; a lockstep simulation sets 29.4 Hz, a 34 ms period, so every EKF tick lands on one
 whole-millisecond clock value.
+`ekf_deterministic_order:=true` (default empty, off) sets `deterministic_measurement_order` on
+the EKF, a parameter only the [Thornbots `robot_localization` fork](../robot_localization/README.md#thornbots-fork)
+has: measurements with the same stamp (a message's pose and twist halves, rf2o's result against
+the adapter's) are processed by topic name instead of in whatever order the callbacks pushed them,
+a wall-time race that changed yaw by 2e-16. The stock apt package ignores the parameter, so the
+simulation checks for the fork; the robot never sets it.
 `rf2o_extrinsic_lookahead_s` (default empty, meaning 0) is the matching rf2o option for a lockstep simulation:
 [its README](../rf2o_laser_odometry/README.md#extrinsic-lookahead) says why.
 
