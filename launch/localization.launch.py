@@ -221,6 +221,7 @@ def generate_launch_description():
             overrides['frequency'] = float(context.launch_configurations['ekf_frequency_hz'])
         if context.launch_configurations.get('ekf_deterministic_order', '').lower() == 'true':
             overrides['deterministic_measurement_order'] = True
+            overrides['publish_queued_stamps'] = True
         if overrides:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as handle:
                 handle.write('ekf_filter_node:\n  ros__parameters:\n')
@@ -395,9 +396,11 @@ def generate_launch_description():
                                           'simulation uses a whole-millisecond period'),
         DeclareLaunchArgument('ekf_deterministic_order', default_value='',
                               description='Simulation only: "true" sets the Thornbots '
-                                          'robot_localization fork\'s '
-                                          'deterministic_measurement_order, so equal-stamp '
-                                          'measurements do not depend on callback order'),
+                                          'robot_localization fork options '
+                                          'deterministic_measurement_order and '
+                                          'publish_queued_stamps, so equal-stamp measurements '
+                                          'do not depend on callback order and a lockstep '
+                                          'simulation can wait for the EKF to hold a stamp'),
         DeclareLaunchArgument('seed_known_team', default_value='none',
                               choices=['none', 'red', 'blue'],
                               description='Simulation only: start the EKF at once from this '

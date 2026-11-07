@@ -296,10 +296,11 @@ def test_launch_gates_amcl_independently_of_room_navigation(monkeypatch, require
     ({}, None),
     ({'ekf_deterministic_order': 'false'}, None),
     ({'ekf_deterministic_order': 'true'},
-     'ekf_filter_node:\n  ros__parameters:\n    deterministic_measurement_order: true\n'),
+     'ekf_filter_node:\n  ros__parameters:\n    deterministic_measurement_order: true\n'
+     '    publish_queued_stamps: true\n'),
     ({'ekf_deterministic_order': 'true', 'ekf_frequency_hz': '29.4'},
      'ekf_filter_node:\n  ros__parameters:\n    frequency: 29.4\n'
-     '    deterministic_measurement_order: true\n'),
+     '    deterministic_measurement_order: true\n    publish_queued_stamps: true\n'),
 ])
 def test_launch_simulation_ekf_overrides_are_opt_in(monkeypatch, configs, expected):
     actions, opaque = load_launch(
