@@ -29,7 +29,8 @@ struct Pose2D
 
 using Cov2 = std::array<std::array<double, 2>, 2>;
 
-// map->root from map->odom and odom->root; yaw wrapped to (-pi, pi].
+// map->root from map->nav_odom and the nav_odom->root navigation pose; yaw
+// wrapped to (-pi, pi].
 Pose2D compose(const Pose2D & map_odom, const Pose2D & odom_root);
 
 // Rotate a 2x2 xy covariance by yaw: R C R^T.

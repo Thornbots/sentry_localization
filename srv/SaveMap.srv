@@ -1,0 +1,9 @@
+# Caller-owned unique destination; must not exist.
+string directory
+# Caller has validated parked return/start; localization validates file contents only.
+bool validated
+# Map capture must be at or after this session start/latest SLAM reset (ROS clock).
+builtin_interfaces/Time minimum_stamp
+---
+bool success
+string message

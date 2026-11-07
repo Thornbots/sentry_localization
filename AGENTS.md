@@ -19,9 +19,5 @@ Sim/bench runs require [approval](../AGENTS.md#containers-and-runs).
 
 ## Open
 
-- `/localization/map_odom` has no reader: the relay's uncertainty gate rejects
-  backend covariances. Changing that gate/covariance interpretation is the user's call.
-- Fixed-heading rf2o assumes no chassis yaw drift; validate that on hardware.
-- [Field initialization](README.md#initial-field-position) needs hardware validation;
-  carried maps and the hard-coded zero saved-map pose remain
-  [track H](../ROADMAP.md#h-slam-at-amcls-level).
+Software commitments: [ROADMAP](../docs/ROADMAP.md#additional-mini-work).
+Physical validation: [ROBOT_TESTS](../docs/ROBOT_TESTS.md#consolidated-hardware-checks).
