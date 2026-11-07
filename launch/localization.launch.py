@@ -216,10 +216,18 @@ def generate_launch_description():
             arguments.extend(['--team', context.launch_configurations['seed_explicit_team']])
         # A node-specific file entry, since ekf.yaml's outranks a wildcard (`/**`) override.
         override_files = []
+        overrides = {}
         if context.launch_configurations.get('ekf_frequency_hz', ''):
-            frequency = float(context.launch_configurations['ekf_frequency_hz'])
+            overrides['frequency'] = float(context.launch_configurations['ekf_frequency_hz'])
+        if context.launch_configurations.get('ekf_deterministic_order', '').lower() == 'true':
+            overrides['deterministic_measurement_order'] = True
+            overrides['publish_queued_stamps'] = True
+        if overrides:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as handle:
-                handle.write(f'ekf_filter_node:\n  ros__parameters:\n    frequency: {frequency!r}\n')
+                handle.write('ekf_filter_node:\n  ros__parameters:\n')
+                for key, value in overrides.items():
+                    text = str(value).lower() if isinstance(value, bool) else repr(value)
+                    handle.write(f'    {key}: {text}\n')
             atexit.register(os.unlink, handle.name)
             override_files.append(handle.name)
         node = Node(
@@ -386,6 +394,13 @@ def generate_launch_description():
                               description='Simulation only: replaces config/ekf.yaml '
                                           'frequency (empty keeps it); a lockstep '
                                           'simulation uses a whole-millisecond period'),
+        DeclareLaunchArgument('ekf_deterministic_order', default_value='',
+                              description='Simulation only: "true" sets the Thornbots '
+                                          'robot_localization fork options '
+                                          'deterministic_measurement_order and '
+                                          'publish_queued_stamps, so equal-stamp measurements '
+                                          'do not depend on callback order and a lockstep '
+                                          'simulation can wait for the EKF to hold a stamp'),
         DeclareLaunchArgument('seed_known_team', default_value='none',
                               choices=['none', 'red', 'blue'],
                               description='Simulation only: start the EKF at once from this '

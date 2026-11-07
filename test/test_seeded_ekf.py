@@ -292,6 +292,30 @@ def test_launch_gates_amcl_independently_of_room_navigation(monkeypatch, require
     assert remappings[1:] == [('/localization/odom', '/localization/scan_odom')]
 
 
+@pytest.mark.parametrize('configs, expected', [
+    ({}, None),
+    ({'ekf_deterministic_order': 'false'}, None),
+    ({'ekf_deterministic_order': 'true'},
+     'ekf_filter_node:\n  ros__parameters:\n    deterministic_measurement_order: true\n'
+     '    publish_queued_stamps: true\n'),
+    ({'ekf_deterministic_order': 'true', 'ekf_frequency_hz': '29.4'},
+     'ekf_filter_node:\n  ros__parameters:\n    frequency: 29.4\n'
+     '    deterministic_measurement_order: true\n    publish_queued_stamps: true\n'),
+])
+def test_launch_simulation_ekf_overrides_are_opt_in(monkeypatch, configs, expected):
+    actions, opaque = load_launch(
+        monkeypatch, Path(__file__).parents[1] / 'launch/localization.launch.py')
+    factory = next(action.kwargs['function'] for action in actions if isinstance(action, opaque))
+    _, node = factory(NS(launch_configurations={
+        'seed_require_team': 'true', **configs}))
+    overrides = node.kwargs['parameters'][2:]
+    if expected is None:
+        assert overrides == []
+    else:
+        text, = (Path(path).read_text() for path in overrides)
+        assert text == expected
+
+
 def test_launch_only_saved_localization_gets_team_map_prior_mapping_keeps_zero(monkeypatch):
     actions, _ = load_launch(
         monkeypatch, Path(__file__).parents[1] / 'launch/localization.launch.py')
