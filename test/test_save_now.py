@@ -98,12 +98,18 @@ def saver(tmp_path):
         minimum = node.get_clock().now().to_msg()
         publish()
         probe = None
+        probe_started = 0.0
 
         def backend_ready():
-            nonlocal probe
+            nonlocal probe, probe_started
             if probe is None:
                 probe = client.call_async(SaveMap.Request(minimum_stamp=minimum))
+                probe_started = time.monotonic()
             if not probe.done():
+                # Discovery can drop an early response; retain the outer deadline.
+                if time.monotonic() - probe_started >= 1.0:
+                    probe.cancel()
+                    probe = None
                 return False
             response = probe.result()
             assert not response.success
