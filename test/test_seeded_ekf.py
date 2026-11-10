@@ -143,12 +143,13 @@ def test_backend_exec_waits_for_first_valid_team_then_sets_only_team_prior(
     monkeypatch.setattr(gate.time, 'monotonic', lambda: 0.0)
     executed = []
 
-    def execute(path, command):
+    def execute(command):
         assert messages == []  # AMCL cannot exist before valid REF_SYS is consumed.
         assert node.destroyed
-        executed.append((path, command))
+        executed.append((command[0], command))
+        return 0
 
-    monkeypatch.setattr(gate.os, 'execvp', execute)
+    monkeypatch.setattr(gate, 'run_supervised', execute)
     forwarded = ['--ros-args', '--params-file', '/tmp/backend.yaml']
     assert gate.main(START_ARGS + ['--seed-use-sim-time', 'false', '--backend', backend, *forwarded]) == 0
     path, command = executed[0]
@@ -171,14 +172,14 @@ def test_no_referee_never_execs_even_after_old_timeout(monkeypatch, backend, cap
     wall_times = iter([0.0, 30.0, 30.0, 60.0, 60.0])
     monkeypatch.setattr(gate.time, 'monotonic', lambda: next(wall_times))
     executed = []
-    monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
+    monkeypatch.setattr(gate, 'run_supervised', lambda command: executed.append((command[0], command)) or 0)
     args = ['--seed-use-sim-time', 'false', '--require-team']
     if backend:
         args += ['--backend', backend]
-    assert gate.main(START_ARGS + args) == 1
+    assert gate.main(START_ARGS + args) == 0
     assert executed == []
     assert node.destroyed
-    assert 'ROS shut down' in capsys.readouterr().err
+    assert 'stopped before the EKF started' in capsys.readouterr().err
 
 
 def test_wall_timeout_with_stopped_ros_clock_never_starts_ekf(monkeypatch, capsys):
@@ -186,7 +187,7 @@ def test_wall_timeout_with_stopped_ros_clock_never_starts_ekf(monkeypatch, capsy
     wall_times = iter([0.0, 0.0, 15.0])
     monkeypatch.setattr(gate.time, 'monotonic', lambda: next(wall_times))
     executed = []
-    monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
+    monkeypatch.setattr(gate, 'run_supervised', lambda command: executed.append((command[0], command)) or 0)
     assert gate.main(START_ARGS + ['--seed-use-sim-time', 'true']) == 1
     assert executed == []
     assert 'EKF was not started' in capsys.readouterr().err
@@ -213,7 +214,7 @@ def test_exec_preserves_launch_configuration_and_overrides_only_seed(monkeypatch
 
     monkeypatch.setattr(gate, 'wait_for_seed', wait)
     executed = []
-    monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
+    monkeypatch.setattr(gate, 'run_supervised', lambda command: executed.append((command[0], command)) or 0)
     forwarded = ['--ros-args', '--params-file', '/tmp/ekf.yaml',
                  '-r', '__node:=ekf_filter_node', '-r',
                  'odometry/filtered:=/localization/odom']
@@ -358,7 +359,7 @@ def test_valid_referee_without_fresh_raw_seed_times_out_without_ekf(monkeypatch,
     wall_times = iter([0.0, 0.0, 0.0, 0.0, 15.0])
     monkeypatch.setattr(gate.time, 'monotonic', lambda: next(wall_times))
     executed = []
-    monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
+    monkeypatch.setattr(gate, 'run_supervised', lambda command: executed.append((command[0], command)) or 0)
     assert gate.main(START_ARGS + ['--seed-use-sim-time', 'false', '--require-team']) == 1
     assert executed == []
     assert node.destroyed
@@ -369,7 +370,7 @@ def test_valid_referee_without_fresh_raw_seed_times_out_without_ekf(monkeypatch,
 def test_known_team_starts_ekf_at_once_from_team_start_without_ros(monkeypatch, blue):
     monkeypatch.setitem(sys.modules, 'rclpy', None)  # a wait would fail to import it
     executed = []
-    monkeypatch.setattr(gate.os, 'execvp', lambda path, command: executed.append((path, command)))
+    monkeypatch.setattr(gate, 'run_supervised', lambda command: executed.append((command[0], command)) or 0)
     args = ['--seed-use-sim-time', 'true', '--known-team', 'blue' if blue else 'red']
     assert gate.main(START_ARGS + args + ['--ros-args', '-r', '__node:=x']) == 0
     path, command = executed[0]
@@ -381,8 +382,52 @@ def test_known_team_starts_ekf_at_once_from_team_start_without_ros(monkeypatch, 
 @pytest.mark.parametrize('backend', ['amcl', 'slam'])
 def test_known_team_is_rejected_for_map_backends(monkeypatch, backend):
     executed = []
-    monkeypatch.setattr(gate.os, 'execvp', lambda *args: executed.append(args))
+    monkeypatch.setattr(gate, 'run_supervised', lambda command: executed.append((command[0], command)) or 0)
     with pytest.raises(SystemExit):
         gate.main(START_ARGS + ['--seed-use-sim-time', 'true', '--known-team', 'blue',
                                 '--backend', backend])
     assert executed == []
+
+
+@pytest.mark.parametrize('code,stop,expected', [(0, False, 0), (9, False, 9), (-6, True, 0)])
+def test_supervision_propagates_exit_and_absorbs_abort_on_stop(monkeypatch, code, stop, expected):
+    import resource
+    import signal
+    import subprocess
+
+    handlers = {}
+    forwarded = []
+    limits = []
+
+    class Child:
+        pid = 123
+
+        def send_signal(self, signum):
+            forwarded.append(signum)
+
+        def wait(self):
+            if stop:
+                handlers[signal.SIGTERM](signal.SIGTERM, None)
+            return code
+
+    monkeypatch.setattr(subprocess, 'Popen', lambda command, preexec_fn: Child())
+    monkeypatch.setattr(signal, 'signal', lambda signum, handler: handlers.update({signum: handler}))
+    monkeypatch.setattr(resource, 'prlimit', lambda *args: limits.append(args), raising=False)
+    assert gate.run_supervised(['backend']) == expected
+    assert forwarded == ([signal.SIGTERM] if stop else [])
+    assert len(limits) == int(stop)
+
+
+def test_supervision_propagates_child_signal(monkeypatch):
+    import signal
+    import subprocess
+
+    child = NS(wait=lambda: -signal.SIGTERM)
+    handlers = []
+    killed = []
+    monkeypatch.setattr(subprocess, 'Popen', lambda command, preexec_fn: child)
+    monkeypatch.setattr(signal, 'signal', lambda *args: handlers.append(args))
+    monkeypatch.setattr(gate.os, 'kill', lambda *args: killed.append(args))
+    assert gate.run_supervised(['backend']) == -signal.SIGTERM
+    assert handlers[-1] == (signal.SIGTERM, signal.SIG_DFL)
+    assert killed == [(gate.os.getpid(), signal.SIGTERM)]

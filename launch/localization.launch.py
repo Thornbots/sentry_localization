@@ -404,7 +404,7 @@ def generate_launch_description():
         DeclareLaunchArgument('seed_known_team', default_value='none',
                               choices=['none', 'red', 'blue'],
                               description='Simulation only: start the EKF at once from this '
-                              'team\'s start instead of waiting for referee and /odom data, so '
+                              "team's start instead of waiting for referee and /odom data, so "
                               'its timer phase is not set by data latency. The map backend '
                               'keeps its referee gate.'),
         *[DeclareLaunchArgument(name, default_value='0.0',
