@@ -121,7 +121,7 @@ class FieldMapTest(unittest.TestCase):
         self.assertEqual(meta['origin'], [-6.230545, -4.249455, 0.0])
         self.assertEqual(pixels.shape, (424, 624))
         values, counts = np.unique(decoded, return_counts=True)
-        self.assertEqual(dict(zip(values, counts)), {-1: 27928, 0: 227149, 100: 9499})
+        self.assertEqual(dict(zip(values, counts)), {-1: 27728, 0: 227349, 100: 9499})
         self.assertEqual(set(np.unique(pixels)), {0, 128, 254})
         self.assertTrue(np.all(decoded[pixels == 0] == 100))
         self.assertTrue(np.all(decoded[pixels == 128] == -1))
@@ -132,6 +132,8 @@ class FieldMapTest(unittest.TestCase):
                            (-3, -2.5, 100), (3, -2.5, 100), (-3.5, -2.5, -1),  # 0.41 m tiers
                            (-3.5, -1.5, 0), (0, 3, 0),  # 0.21 m platforms
                            (-3.5, -3.25, 100), (-3.5, -3.5, 0),  # Side Limbo spacer, bars
+                           (-5, -.08, 100), (-5, 0, -1), (-5, .08, 100),  # Side Wall
+                           (5, -.08, 100), (5, 0, -1), (5, .08, 100),
                            (-4, -.635, 0), (-5.25, -3, 0), (0, 4.2, -1)]:
             self.assertEqual(pixel_at(decoded, meta, x, y), cell, (x, y))
 
