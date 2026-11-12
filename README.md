@@ -379,11 +379,11 @@ including a parked coverage sweep.
 RPLIDAR A2M8's minimum is 0.05 m (real scans report `range_min` 0.05), so 0.15
 is a margin, not the hardware limit. It is kept because nothing proves the
 self-filter covers the body: [`lidar_self_filter`](../thornbots_pkg/README.md#lidar_self_filter)
-blanks only a CAD-derived 5-81 deg sector whose real zero direction is
-unmeasured, the head-fixed parts start 0.045 m from the lidar, and the
-2026-10-18 robot capture logged per-scan statistics, not per-beam ranges
-(0.05-0.15 m returns were never inspected). Sim cannot test it: its lidar never
-sees the robot. The physical range/mount gate is maintained in
+blanks the level-pitch head sector measured for the earlier upright mount;
+the restored mount and nose-up/down sectors still need robot validation, and
+the 2026-10-18 robot capture logged per-scan statistics rather than per-beam
+ranges (0.05-0.15 m returns were never inspected). Sim cannot test it: its
+lidar never sees the robot. The physical range/mount gate is maintained in
 [ROBOT_TESTS LIDAR-mount](../docs/ROBOT_TESTS.md#consolidated-hardware-checks).
 
 **correlation_search_space_dimension: 2.5** (was 0.5) and
