@@ -29,8 +29,17 @@ struct Pose2D
 
 using Cov2 = std::array<std::array<double, 2>, 2>;
 
-// map->root from map->odom and odom->root; yaw wrapped to (-pi, pi].
+// map->root from map->nav_odom and the nav_odom->root navigation pose; yaw
+// wrapped to (-pi, pi].
 Pose2D compose(const Pose2D & map_odom, const Pose2D & odom_root);
+
+// map->nav_odom from backend map->root and local nav_odom->root at one stamp.
+Pose2D map_correction(const Pose2D & map_root, const Pose2D & nav_root);
+
+// A backend covariance is usable only at/after its stamp, within its lifetime,
+// and with finite nonnegative yaw variance and positive-semidefinite xy covariance.
+bool usable_backend_covariance(const Cov2 & cov, double yaw_var,
+  double backend_t, double pose_t, double max_age_s);
 
 // Rotate a 2x2 xy covariance by yaw: R C R^T.
 Cov2 rotate_cov_xy(const Cov2 & cov_xy, double yaw);

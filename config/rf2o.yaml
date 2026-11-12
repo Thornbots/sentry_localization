@@ -22,7 +22,7 @@ rf2o_laser_odometry:
     fail_valid_fraction: 0.25    # below this: failed; a 60 deg arc reads 0.17
     max_match_sigma: 0.01        # m, match std-dev on any axis: degraded; clean <= 0.0015
     max_speed: 6.0               # m/s; clean <= 4.03, a jerk reads 7-9
-    max_extrinsic_age: 0.1       # s; the head's TF trails each scan 0.01 s in sim
+    max_extrinsic_age: 0.05      # s; stale skips the scan. 90 Hz head TF: p99 0.015 s in sim
     degraded_position_variance: 0.01  # m^2 added along each weak axis
     failed_variance_rate: 0.05   # m^2 per second spent failed
     max_failed_variance: 1.0     # m^2
