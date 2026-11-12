@@ -77,3 +77,27 @@ TEST(MapPoseCore, CovRotationKeepsTraceAndSymmetry)
   EXPECT_EQ(r[0][1], r[1][0]);
   expect_approx(r[0][0] * r[1][1] - r[0][1] * r[0][1], 3.0 * 2.0 - 0.25);
 }
+
+TEST(MapPoseCore, BackendCovarianceMustBeCurrentFiniteAndPositiveSemidefinite)
+{
+  using sentry_localization::usable_backend_covariance;
+  const Cov2 cov{{{.04, .01}, {.01, .09}}};
+  EXPECT_TRUE(usable_backend_covariance(cov, .01, 1, 1.5, 1));
+  EXPECT_TRUE(usable_backend_covariance(Cov2{{{-1e-12, 0}, {0, 0}}}, 0, 1, 1.5, 1));
+  EXPECT_FALSE(usable_backend_covariance(Cov2{{{-.001, 0}, {0, 0}}}, 0, 1, 1.5, 1));
+  EXPECT_FALSE(usable_backend_covariance(cov, .01, 1, 2.01, 1));
+  EXPECT_FALSE(usable_backend_covariance(cov, .01, 2, 1.5, 1));
+  EXPECT_FALSE(usable_backend_covariance(cov, NAN, 1, 1.5, 1));
+  EXPECT_FALSE(usable_backend_covariance(Cov2{{{.01, .1}, {.1, .01}}}, .01, 1, 1.5, 1));
+  EXPECT_FALSE(usable_backend_covariance(Cov2{{{NAN, 0}, {0, .04}}}, .01, 1, 1.5, 1));
+}
+
+TEST(MapPoseCore, CorrectionPairsPosesAtTheSameCaptureStamp)
+{
+  const Pose2D nav{2, 3, .3}, map{5, -4, .7};
+  const auto correction = sentry_localization::map_correction(map, nav);
+  const auto recovered = compose(correction, nav);
+  EXPECT_NEAR(recovered.x, map.x, 1e-9);
+  EXPECT_NEAR(recovered.y, map.y, 1e-9);
+  EXPECT_NEAR(recovered.yaw, map.yaw, 1e-9);
+}

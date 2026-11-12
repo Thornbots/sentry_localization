@@ -30,6 +30,26 @@ Pose2D compose(const Pose2D & map_odom, const Pose2D & odom_root)
     std::atan2(std::sin(sum), std::cos(sum))};
 }
 
+Pose2D map_correction(const Pose2D & map_root, const Pose2D & nav_root)
+{
+  const double c = std::cos(nav_root.yaw), s = std::sin(nav_root.yaw);
+  return compose(map_root, {-c*nav_root.x-s*nav_root.y,
+    s*nav_root.x-c*nav_root.y, -nav_root.yaw});
+}
+
+bool usable_backend_covariance(const Cov2 & cov, double yaw_var,
+  double backend_t, double pose_t, double max_age_s)
+{
+  const double a = cov[0][0], b = cov[0][1], d = cov[1][1];
+  return std::isfinite(backend_t) && std::isfinite(pose_t) &&
+    pose_t >= backend_t && pose_t - backend_t <= max_age_s &&
+    std::isfinite(a) && std::isfinite(b) && std::isfinite(d) &&
+    std::isfinite(cov[1][0]) && std::abs(b - cov[1][0]) < 1e-9 &&
+    // AMCL's zero-spread prior can have roundoff near -1e-12 m^2.
+    .5 * (a + d - std::hypot(a - d, 2*b)) >= -1e-9 &&
+    std::isfinite(yaw_var) && yaw_var >= -1e-9;
+}
+
 Cov2 rotate_cov_xy(const Cov2 & cov_xy, double yaw)
 {
   const double a = cov_xy[0][0];
