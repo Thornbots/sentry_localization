@@ -19,12 +19,20 @@ from builtin_interfaces.msg import Time
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 import rclpy
+from std_srvs.srv import Empty
 
 
 def test_stamps_freshness_and_missing_transform():
     rclpy.init()
     node = rclpy.create_node('map_pose_contract_test')
     outputs = []
+    refreshes = []
+
+    def refresh(request, response):
+        refreshes.append(request)
+        return response
+
+    node.create_service(Empty, '/test/nomotion_update', refresh)
     subscription = node.create_subscription(Odometry, '/test/map_result', outputs.append, 100)
     odom = node.create_publisher(Odometry, '/test/local_pose', 10)
     backend = node.create_publisher(PoseWithCovarianceStamped, '/test/backend_pose', 10)
@@ -34,7 +42,8 @@ def test_stamps_freshness_and_missing_transform():
                                 '-p', 'input_topic:=/test/local_pose',
                                 '-p', 'output_topic:=/test/map_result',
                                 '-p', 'backend_pose_topic:=/test/backend_pose',
-                                '-p', 'map_frame:=test_map'])
+                                '-p', 'map_frame:=test_map',
+                                '-p', 'nomotion_update_service:=/test/nomotion_update'])
 
     def wait(predicate):
         end = time.monotonic() + 10
@@ -70,6 +79,12 @@ def test_stamps_freshness_and_missing_transform():
         # Missing backend still produces an invalid result for the relay handshake.
         assert math.isnan(sample(1.).pose.pose.position.x)
         assert math.isnan(sample(2.).pose.pose.position.x)
+        # Continue ticks while service discovery completes, as a parked EKF does.
+        for _ in range(20):
+            if refreshes:
+                break
+            sample(2.)
+        assert refreshes  # recover a missed initial backend publication
         pose = PoseWithCovarianceStamped()
         pose.header.stamp, pose.header.frame_id = Time(sec=1, nanosec=500000000), 'test_map'
         pose.pose.pose.position.x, pose.pose.pose.position.y = 1., 2.

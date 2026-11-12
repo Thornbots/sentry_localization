@@ -24,7 +24,7 @@ for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
   in `map`, no newer than the input and at most `max_backend_age_s` (1 s) old.
   Nonfinite/nonpositive-semidefinite covariance is rejected, with a 1e-9
   roundoff tolerance for AMCL's zero-spread prior. In AMCL mode the adapter
-  requests `/request_nomotion_update` once backend age reaches 0.5 s, at most
+  requests `/request_nomotion_update` when no backend sample exists or its age reaches 0.5 s, at most
   twice per simulated/ROS second. This obtains fresh scan-backed covariance
   while parked, including startup retries. Requests never unblock an invalid
   pose; missing service responses remain bounded to one pending request.

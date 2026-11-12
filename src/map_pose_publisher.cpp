@@ -111,7 +111,7 @@ private:
     }
     // AMCL otherwise stops pose/covariance updates while parked. Ask for a
     // new scan update rather than pretending old covariance is still fresh.
-    if (refresh_client_ && backend && t-backend->t >= 0.5 &&
+    if (refresh_client_ && (!backend || t-backend->t >= 0.5) &&
       (!last_refresh_ || t-*last_refresh_ >= 0.5) && refresh_client_->service_is_ready())
     {
       if (refresh_id_) {refresh_client_->remove_pending_request(*refresh_id_);}
