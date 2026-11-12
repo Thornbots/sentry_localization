@@ -260,7 +260,7 @@ runs `TrackedMountAmcl`, which refreshes that x/y from TF at each scan stamp
 before AMCL's own callback. `root` stays AMCL's base, so seeds and `/amcl_pose`
 keep their meaning. Parked checks cannot see this bug, since parked AMCL adds no
 motion noise; a head-sweeping drive can. Measurements are in the
-[full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.md#amcl-moving-mount).
+[full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.html#amcl-moving-mount).
 It relies on AmclNode's protected members; recheck it after a nav2 upgrade.
 
 `robot_model_type` is `nav2_amcl::OmniMotionModel`, with its strafe noise
@@ -362,7 +362,7 @@ and offset on every scan; `map->nav_odom` still corrects the public root pose.
 AMCL and rf2o keep their `root` base and refresh the moving mount each scan
 ([AMCL](#configamclyaml)). This does not compensate physical scan
 tilt or height changes missing from the planar TF tree. See the
-[full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.md).
+[full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.html).
 Start a new mapping session after this change; do not resume a serialized graph
 created with the old root tracking base.
 
@@ -545,7 +545,7 @@ through previously observed geometry and close the loop at the captured start.
 A small central loop can look accurate while leaving much of the field unseen.
 Inspect coverage and wall placement, including the backs of obstacles, before
 deploying the map. Keep a rollback snapshot if a transfer distorts established
-walls. The [full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.md)
+walls. The [full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.html)
 records the validated sim route, coverage, input choices and remaining limits.
 
 Use level, parked observation stations around rough ground. Pause scan insertion
