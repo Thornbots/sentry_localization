@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME} "srv/SaveMap.srv"
 find_package(geometry_msgs REQUIRED)
 find_package(dji_serial_bridge REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(nav2_amcl REQUIRED)
@@ -49,7 +50,7 @@ ament_target_dependencies(ekf_input_publisher nav_msgs rclcpp)
 
 add_executable(map_pose_publisher src/map_pose_publisher.cpp)
 target_link_libraries(map_pose_publisher ${PROJECT_NAME}_core)
-ament_target_dependencies(map_pose_publisher geometry_msgs nav_msgs rclcpp tf2 tf2_ros)
+ament_target_dependencies(map_pose_publisher geometry_msgs nav_msgs rclcpp std_srvs)
 
 add_executable(map_autosaver src/map_autosaver.cpp)
 target_link_libraries(map_autosaver ${PROJECT_NAME}_core)
@@ -74,6 +75,8 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(ament_cmake_pep257 REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_map_pose_publisher test/test_map_pose_publisher.py TIMEOUT 40
+    APPEND_ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   ament_add_pytest_test(test_save_now test/test_save_now.py TIMEOUT 90
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     ENV "PYTEST_ADDOPTS=-p no:anyio")

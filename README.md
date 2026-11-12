@@ -14,12 +14,29 @@ for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
   `nav_odom->odom`; raw `odom->root` remains independent.
 - `slam_toolbox` or `amcl` broadcasts `map->nav_odom` directly. Frame roles
   and deviations are owned by [thornbots_pkg](../thornbots_pkg/README.md#pose_translator).
-- Out: `/localization/map_odom` under `slam`/`mapping`/`amcl`:
-  `/localization/odom` moved into `map` by `map_pose_publisher`. Its xy
-  covariance adds the backend's own (`/amcl_pose`, slam_toolbox's `/pose`);
-  until that arrives it reads 1 m^2. Not yet read by `mcb_relay`, whose
-  0.02 m std gate it never passes (2026-10-02, sim: amcl 0.17-0.30 m,
-  mapping 0.05-0.08 m).
+- Out: `/localization/map_odom` under `slam`/`mapping`/`amcl`, one result for
+  every `/localization/odom` input. A correction is derived from the backend's
+  `map->root` pose and interpolated local `nav_odom->root` at the **same backend
+  capture stamp**, then composed with the input pose. No global TF lookup or
+  latest-TF fallback is used: AMCL future-dates TF by its transform tolerance.
+  Results retain the input capture stamp and child-frame twist. xy covariance is rotated local covariance plus backend
+  covariance; yaw variance includes the backend's. The backend sample must be
+  in `map`, no newer than the input and at most `max_backend_age_s` (1 s) old.
+  Nonfinite/nonpositive-semidefinite covariance is rejected, with a 1e-9
+  roundoff tolerance for AMCL's zero-spread prior. In AMCL mode the adapter
+  requests `/request_nomotion_update` when no backend sample exists or its age reaches 0.5 s, at most
+  twice per simulated/ROS second. This obtains fresh scan-backed covariance
+  while parked, including startup retries. Requests never unblock an invalid
+  pose; missing service responses remain bounded to one pending request.
+- Missing same-stamp local history or stale/invalid covariance produces a result at the same stamp with
+  NaN x/y and infinite xy/yaw variance. This is an invalid result, never a
+  usable position. It lets lockstep consumers answer every EKF tick without
+  waiting for a future scan. Consumers must check finiteness and covariance.
+- `mcb_relay` consumes these absolute field poses with AMCL and saved-map SLAM.
+  Blank mapping's local-zero map is not a field reference: mapping and
+  odometry-only operation retain team-start `/localization/odom` instead.
+  Relay gates and the held firmware-position estimate are owned by
+  [thornbots_pkg](../thornbots_pkg/README.md#mcb_relay).
 
 `thornbots_pkg/launch/auto.launch.py` includes `launch/localization.launch.py`.
 Use that robot entrypoint; do not run a second localization launch alongside it.
@@ -36,7 +53,7 @@ The [operator workflow](../thornbots_pkg/README.md#field-day-and-room-workflow) 
 
 `localization.launch.py` and `auto.launch.py` default to `amcl` on
 `map_file` (since 2026-10-30; `auto.launch.py` used `mapping` from
-2026-10-02), with `mcb_relay` still relocalizing from `/localization/odom`.
+2026-10-02). `mcb_relay` now uses the absolute map result for match navigation.
 
 `use_rf2o` (named `use_ekf` before 2026-09-28) picks the `/localization/odom`
 source, with any mode:
@@ -124,7 +141,8 @@ periodic backups. Backends and noise parameters are unchanged.
 
 Nodes (C++, `src/`): `ekf_input_publisher`, `passthrough_odom_publisher`, `map_pose_publisher` (math in
 `map_pose_core`) and `map_autosaver` (file writers in `map_image`). `thornbots_pkg/src/mcb_relay.cpp` compares
-`/localization/odom` with raw `/odom` plus its last sent navigation offset.
+`/localization/map_odom` with its held navigation estimate; mapping/none use
+team-start `/localization/odom`.
 
 ## Testing
 

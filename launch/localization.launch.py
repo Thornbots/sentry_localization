@@ -299,6 +299,8 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': use_sim_time,
             'backend_pose_topic': backend_pose_topic,
+            'nomotion_update_service': PythonExpression([
+                "'/request_nomotion_update' if '", localization_mode, "' == 'amcl' else ''"]),
         }],
     )
 
