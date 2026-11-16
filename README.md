@@ -252,7 +252,8 @@ republish the previous pose at full confidence, and a scan with too few
 points on every pyramid level read as zero motion.
 
 Parked, scan-to-scan matching still integrated match noise, the EKF
-followed `/scan_odom`, and AMCL never updates a parked robot. With
+followed `/scan_odom`, and AMCL's motion thresholds are not reached (only
+no-motion update requests, above, refresh it). With
 `reference_scans` (rf2o's [README](../rf2o_laser_odometry/README.md)) a
 parked scan matches one bounded-age anchor through the stamped head offset. That
 anchors the pose without trusting the wheels, so a shove still moves it
@@ -262,9 +263,10 @@ driving slowly, they matched across up to 5 cm, read short and raised AMCL
 drift-suite corrections. Measurements:
 [T39 investigation](../docs/investigations/t39-parked-drift-2026-10-25.md).
 The follow-up bounds anchor age at 7.5 s and discards degraded anchors.
-This enablement remains draft/held in
-[localization #18](https://github.com/Thornbots/sentry_localization/pull/18)
-until the following robot acceptance passes and a human reviews the evidence.
+References are on by default since
+[localization #18](https://github.com/Thornbots/sentry_localization/pull/18),
+enabled before the robot acceptance below by decision on 2026-11-15; that
+run confirms them.
 
 #### Robot parked acceptance
 
@@ -312,7 +314,7 @@ The stamped head transform compensates the scan-to-anchor mount offset,
 but a single anchor and one transform per scan cannot remove within-scan
 motion distortion. Bounded anchor age and quality rejection limit exposure;
 they do not establish real-sensor robustness during fast panning. The robot
-test must establish it before enablement can merge. A still wheel prior
+test must establish it. A still wheel prior
 also cannot establish a still chassis: an anchor may contain a pedestrian
 or mask slow translation until it is replaced. The crossing and wheels-held
 slow-shove checks must show that anchoring neither jumps on scene changes
