@@ -412,13 +412,14 @@ and root-frame twist enter `odom0`. `nav_odom` keeps raw odometry's axes;
 the correction TF changes translation only, matching the MCB navigation offset.
 Historical measurements below use the frame names present during those runs.
 
-`dynamic_process_noise_covariance: true`, with x/y `process_noise_covariance`
-raised 0.05 to 0.08 (`8a719ab`), scales process noise with estimated
-velocity. Isolated `noise_correction` runs went from ~40-50% passing to
-~60-80%, at both 0.25 and 0.15 slip. Both full-suite attempts failed
-(growth_ratio 2.17 and 2.49), and nobody knows why; load or leftover state
-from earlier scenarios are candidates. Kept for the isolated gain. Confirm
-`noise_correction` in the context you're reporting before calling it passing.
+**Static process covariance.** With velocity scaling enabled, `robot_localization`
+multiplies the pose process covariance by the squared norm of the estimated
+twist. When the wheels read still, this drives the position process noise
+toward zero and makes the EKF slow to accept scan position corrections after a
+shove. `dynamic_process_noise_covariance: false` keeps the configured position
+process noise active while parked. The earlier velocity-scaled tuning
+(`8a719ab`) helped isolated `noise_correction` runs but failed both full-suite
+attempts (growth ratios 2.17 and 2.49).
 
 ### config/slam.yaml
 

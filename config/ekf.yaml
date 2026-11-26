@@ -24,14 +24,10 @@ ekf_filter_node:
 
     publish_tf: false
 
-    # Scales process_noise_covariance by the filter's own current velocity
-    # estimate -- more injected noise while moving fast, less near zero
-    # velocity. Paired with process_noise_covariance x/y raised 0.05->0.08.
-    # Improves noise_correction's growth_ratio boundedness in isolated
-    # --scenario runs (~80% pass rate vs ~50% at the static-0.05 baseline)
-    # but is NOT a reliable pass in full-suite context -- see README.md
-    # Notes for the measured numbers and the isolated-vs-suite discrepancy.
-    dynamic_process_noise_covariance: true
+    # Keep position process noise when the wheel encoders report zero
+    # velocity. Scan position must still correct a chassis displacement
+    # while the wheels are held.
+    dynamic_process_noise_covariance: false
 
     odom0: /localization/ekf_input
     # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
