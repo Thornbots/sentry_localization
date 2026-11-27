@@ -32,6 +32,13 @@ for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
   NaN x/y and infinite xy/yaw variance. This is an invalid result, never a
   usable position. It lets lockstep consumers answer every EKF tick without
   waiting for a future scan. Consumers must check finiteness and covariance.
+- Lockstep simulation only: with `backend_result_topic` set, the adapter answers
+  input `t` only after AMCL has answered every scan it has seen at or before
+  `t - backend_delay_s`, and uses no newer sample. It publishes `~/scan_seen`
+  for each scan, for the sim's `scan` chain. `TrackedMountAmcl` then answers
+  every scan once on `scan_result_topic` (its pose for that scan, or an empty
+  `frame_id`) and runs on sim time alone; see [config/amcl.yaml](#configamclyaml).
+  All of it defaults off; the robot keeps the newest arrived sample.
 - `mcb_relay` consumes these absolute field poses with AMCL and saved-map SLAM.
   Blank mapping's local-zero map is not a field reference: mapping and
   odometry-only operation retain team-start `/localization/odom` instead.
@@ -331,6 +338,15 @@ keep their meaning. Parked checks cannot see this bug, since parked AMCL adds no
 motion noise; a head-sweeping drive can. Measurements are in the
 [full-field investigation](../docs/investigations/fieldmap-divergence-2026-10-22.md#amcl-moving-mount).
 It relies on AmclNode's protected members; recheck it after a nav2 upgrade.
+
+**Lockstep AMCL.** With `scan_result_topic` set (sim only), `TrackedMountAmcl`
+takes scans from its own subscription, in stamp order, once TF reaches
+`tf_lookahead_s` past each, and answers every scan, active or not. It ignores
+scans before `start_at_s`, then starts from `start_pose`/`start_cov` with its own
+`pf_seed`ed draws and seeds `drand48` for the filter. Stock `pf_init` reseeds
+from a count of earlier `/initialpose` messages, which the sim sends on wall
+time. It registers the laser at the scan stamp, not latest TF, and forces an
+update when a scan is `refresh_after_s` past its last pose. Defaults are off.
 
 `robot_model_type` is `nav2_amcl::OmniMotionModel`, with its strafe noise
 term, since the chassis is holonomic (it translates without turning).

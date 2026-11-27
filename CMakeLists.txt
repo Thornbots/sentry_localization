@@ -17,6 +17,8 @@ rosidl_generate_interfaces(${PROJECT_NAME} "srv/SaveMap.srv"
 find_package(geometry_msgs REQUIRED)
 find_package(dji_serial_bridge REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
@@ -38,7 +40,7 @@ target_include_directories(${PROJECT_NAME}_core PUBLIC
 add_executable(passthrough_odom_publisher src/passthrough_odom_publisher.cpp)
 add_executable(localization_backend src/localization_backend.cpp)
 ament_target_dependencies(localization_backend
-  rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox
+  geometry_msgs rclcpp rclcpp_components nav2_amcl nav2_map_server nav2_lifecycle_manager slam_toolbox
   sensor_msgs tf2 tf2_ros)
 # slam_toolbox exports its backend libraries separately from its rosidl targets.
 target_link_libraries(localization_backend ${slam_toolbox_LIBRARIES} Boost::serialization TBB::tbb)
@@ -50,7 +52,8 @@ ament_target_dependencies(ekf_input_publisher nav_msgs rclcpp)
 
 add_executable(map_pose_publisher src/map_pose_publisher.cpp)
 target_link_libraries(map_pose_publisher ${PROJECT_NAME}_core)
-ament_target_dependencies(map_pose_publisher geometry_msgs nav_msgs rclcpp std_srvs)
+ament_target_dependencies(map_pose_publisher geometry_msgs nav_msgs rclcpp sensor_msgs std_msgs
+  std_srvs)
 
 add_executable(map_autosaver src/map_autosaver.cpp)
 target_link_libraries(map_autosaver ${PROJECT_NAME}_core)
