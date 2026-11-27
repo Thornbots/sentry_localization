@@ -15,6 +15,7 @@
 // One map pose result per local odometry tick. Unavailable global data carries
 // NaN position and infinite covariance; consumers must reject it. See README.md.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <deque>
@@ -25,6 +26,8 @@
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
+#include "std_msgs/msg/header.hpp"
 #include "sentry_localization/map_pose_core.hpp"
 #include "std_srvs/srv/empty.hpp"
 
@@ -58,24 +61,93 @@ public:
     }
     map_frame_ = get_parameter("map_frame").as_string();
     pub_ = create_publisher<nav_msgs::msg::Odometry>(get_parameter("output_topic").as_string(), 10);
-    backend_sub_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
-      get_parameter("backend_pose_topic").as_string(), 10,
-      [this](geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg) {
-        const auto & c = msg->pose.covariance;
-        if (msg->header.frame_id != map_frame_) {return;}
-        const double t = rclcpp::Time(msg->header.stamp).seconds();
+    // Lockstep simulation only (backend_result_topic): the backend answers every scan
+    // (empty frame_id: no pose). A tick waits until every scan up to backend_delay_s
+    // before it is answered and uses only those, so its compute time picks no tick.
+    const auto result_topic = declare_parameter("backend_result_topic", std::string(""));
+    backend_delay_s_ = declare_parameter("backend_delay_s", 0.0);
+    const auto keep = [this](const geometry_msgs::msg::PoseWithCovarianceStamped & msg) {
+        if (msg.header.frame_id != map_frame_) {return;}
+        const auto & c = msg.pose.covariance;
+        const double t = rclcpp::Time(msg.header.stamp).seconds();
         if (!backend_.empty() && t < backend_.back().t) {backend_.clear();}
-        const auto & p = msg->pose.pose;
+        const auto & p = msg.pose.pose;
         backend_.push_back({t, Cov2{{{c[0], c[1]}, {c[6], c[7]}}}, c[35],
           {p.position.x, p.position.y, yaw_of(p.orientation)}});
         while (backend_.size() > 100) {backend_.pop_front();}
-      });
+      };
+    if (result_topic.empty()) {
+      backend_sub_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        get_parameter("backend_pose_topic").as_string(), 10,
+        [keep](geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg) {keep(*msg);});
+    } else {
+      // The backend refreshes itself on scan stamps (refresh_after_s), not on a service call.
+      refresh_client_.reset();
+      backend_sub_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        result_topic, rclcpp::QoS(100).reliable(),
+        [this, keep](geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg) {
+          keep(*msg);
+          const double t = rclcpp::Time(msg->header.stamp).seconds();
+          answered_ = std::max(answered_.value_or(t), t);
+          ++answers_;
+          drain();
+        });
+      // A lockstep chain acks this, so each scan is seen here before later ticks run.
+      scan_seen_pub_ = create_publisher<std_msgs::msg::Header>(
+        declare_parameter("scan_seen_topic", std::string("~/scan_seen")), 100);
+      scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
+        declare_parameter("scan_topic", std::string("/scan")), rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::LaserScan::ConstSharedPtr scan) {
+          seen_.push_back(rclcpp::Time(scan->header.stamp).seconds());
+          while (seen_.size() > 1000) {seen_.pop_front();}
+          scan_seen_pub_->publish(scan->header);
+        });
+      // Only notices a backend that has gone away; data events drain otherwise.
+      drain_timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() {drain();});
+      stats_timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::seconds(5), [this]() {
+          RCLCPP_INFO(get_logger(), "backend results: %zu ticks waited for one; %zu answers",
+            deferred_, answers_);
+        });
+    }
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       get_parameter("input_topic").as_string(), 10,
-      [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {odom_cb(*msg);});
+      [this](nav_msgs::msg::Odometry::ConstSharedPtr msg) {
+        pending_.push_back(msg);
+        drain();
+        deferred_ += !pending_.empty() && pending_.back() == msg;
+      });
   }
 
 private:
+  // Newest backend stamp tick t may use; the tolerance keeps whole-ms stamps exact.
+  double due(double t) const
+  {
+    return backend_delay_s_ > 0.0 ? t - backend_delay_s_ + 1e-9 : t;
+  }
+
+  // Lockstep: every scan the backend should have answered by tick t has been answered.
+  bool backend_ready(double t) const
+  {
+    if (!scan_sub_ || !answered_ || backend_sub_->get_publisher_count() == 0) {
+      return true;
+    }
+    for (auto i = seen_.rbegin(); i != seen_.rend(); ++i) {
+      if (*i <= due(t)) {return *i <= *answered_;}
+    }
+    return true;
+  }
+
+  void drain()
+  {
+    while (!pending_.empty() &&
+      backend_ready(rclcpp::Time(pending_.front()->header.stamp).seconds()))
+    {
+      const auto msg = pending_.front();
+      pending_.pop_front();
+      odom_cb(*msg);
+    }
+  }
+
   std::optional<Pose2D> local_at(double t) const
   {
     if (local_.empty() || t < local_.front().t || t > local_.back().t) {return std::nullopt;}
@@ -107,7 +179,7 @@ private:
     last_tick_ = t;
     const Backend * backend = nullptr;
     for (auto i = backend_.rbegin(); i != backend_.rend(); ++i) {
-      if (i->t <= t) {backend = &*i; break;}
+      if (i->t <= due(t)) {backend = &*i; break;}
     }
     // AMCL otherwise stops pose/covariance updates while parked. Ask for a
     // new scan update rather than pretending old covariance is still fresh.
@@ -173,6 +245,14 @@ private:
   std::deque<Backend> backend_;
   std::optional<double> last_tick_;
   double max_backend_age_s_;
+  double backend_delay_s_{0.0};
+  std::optional<double> answered_;
+  std::deque<double> seen_;
+  std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> pending_;
+  rclcpp::Publisher<std_msgs::msg::Header>::SharedPtr scan_seen_pub_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+  rclcpp::TimerBase::SharedPtr drain_timer_, stats_timer_;
+  size_t deferred_{0}, answers_{0};
   std::optional<double> last_refresh_;
   std::optional<int64_t> refresh_id_;
   rclcpp::Client<std_srvs::srv::Empty>::SharedPtr refresh_client_;
