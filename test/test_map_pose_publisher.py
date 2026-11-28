@@ -19,6 +19,7 @@ from builtin_interfaces.msg import Time
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 import rclpy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Header
 from std_srvs.srv import Empty
@@ -126,7 +127,10 @@ def test_lockstep_backend_results_wait_for_answered_scans():
     node.create_subscription(Header, '/test/scan_seen', seen.append, 100)
     odom = node.create_publisher(Odometry, '/test/local_pose', 10)
     results = node.create_publisher(PoseWithCovarianceStamped, '/test/scan_result', 100)
-    scans = node.create_publisher(LaserScan, '/test/scan', 10)
+    # Lockstep mode reads the scan reliable and transient-local, as the sim latches /scan.
+    scans = node.create_publisher(LaserScan, '/test/scan', QoSProfile(
+        depth=10, reliability=ReliabilityPolicy.RELIABLE,
+        durability=DurabilityPolicy.TRANSIENT_LOCAL))
     executable = Path(get_package_prefix('sentry_localization')) / (
         'lib/sentry_localization/map_pose_publisher')
     process = subprocess.Popen([str(executable), '--ros-args',
