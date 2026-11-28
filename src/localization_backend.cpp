@@ -66,10 +66,13 @@ public:
     if (topic.empty()) {return;}
     // Plain publisher and subscription, not the message filter: every scan is answered
     // once, in stamp order, inactive or not, when TF covers it (retried on a wall timer).
+    // Reliable and transient-local (the sim latches /scan): map_pose_publisher holds a tick
+    // for each scan's answer, so a scan dropped here or sent before discovery matched
+    // would stop the lockstep sim.
     result_pub_ = rclcpp::create_publisher<Pose>(
       get_node_topics_interface(), topic, rclcpp::QoS(100).reliable());
     scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
-      get_parameter("scan_topic").as_string(), rclcpp::SensorDataQoS(),
+      get_parameter("scan_topic").as_string(), rclcpp::QoS(100).reliable().transient_local(),
       [this](sensor_msgs::msg::LaserScan::ConstSharedPtr scan) {
         queue_.push_back(scan);
         pump();

@@ -95,8 +95,9 @@ public:
       // A lockstep chain acks this, so each scan is seen here before later ticks run.
       scan_seen_pub_ = create_publisher<std_msgs::msg::Header>(
         declare_parameter("scan_seen_topic", std::string("~/scan_seen")), 100);
+      // Reliable, like the backend's scan subscription: a scan seen here must reach it.
       scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
-        declare_parameter("scan_topic", std::string("/scan")), rclcpp::SensorDataQoS(),
+        declare_parameter("scan_topic", std::string("/scan")), rclcpp::QoS(100).reliable().transient_local(),
         [this](sensor_msgs::msg::LaserScan::ConstSharedPtr scan) {
           seen_.push_back(rclcpp::Time(scan->header.stamp).seconds());
           while (seen_.size() > 1000) {seen_.pop_front();}
