@@ -38,6 +38,9 @@ for how the two fit, and `../docs/ARCC_2026_SENTRY_CONTEXT.md` for game rules.
   for each scan, for the sim's `scan` chain. `TrackedMountAmcl` then answers
   every scan once on `scan_result_topic` (its pose for that scan, or an empty
   `frame_id`) and runs on sim time alone; see [config/amcl.yaml](#configamclyaml).
+  Both subscribe to the scan reliably and transient-local in this mode, so the
+  scan publisher must latch it: a scan one of them dropped under CPU load, or
+  one sent before discovery matched it, would hold the simulation forever.
   All of it defaults off; the robot keeps the newest arrived sample.
 - `mcb_relay` consumes these absolute field poses with AMCL and saved-map SLAM.
   Blank mapping's local-zero map is not a field reference: mapping and
